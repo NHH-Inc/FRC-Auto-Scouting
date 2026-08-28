@@ -67,3 +67,22 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# --- component 3 (web) ---
+node_modules/
+dist/
+.env
+.env.local
+*.tsbuildinfo
+
+# --- editors ---
+# .idea/ is currently tracked from an earlier commit; `git rm -r --cached .idea` to drop it.
+.idea/
+.vscode/
+
+# --- component 2 (ingest) ---
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+data/

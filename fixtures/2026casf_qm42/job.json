@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "job_id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
+  "match_id": "2026casf_qm42",
+  "video_id": "dQw4w9WgXcQ",
+  "local_path": "/data/segments/dQw4w9WgXcQ_00120_00272.mp4",
+  "start_offset": 120,
+  "duration": 152,
+  "fps": 30,
+  "width": 640,
+  "height": 360,
+  "status": "complete",
+  "alliances": {
+    "red": [
+      254,
+      1678,
+      971
+    ],
+    "blue": [
+      118,
+      148,
+      2056
+    ]
+  },
+  "tba_score": {
+    "red": 90,
+    "blue": 60
+  }
+}

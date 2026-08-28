@@ -1,21 +1,65 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Event",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frc-video-scouting/contracts/events.schema.json",
+  "title": "Event record (Contract B)",
+  "description": "Produced by component 1, stored and served by component 2, rendered by component 3. Written as JSON Lines to events.jsonl, one object per line, in ascending t_seconds order.",
   "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "job_id",
+    "match_id",
+    "event_id",
+    "team",
+    "track_id",
+    "t_seconds",
+    "phase",
+    "event_type",
+    "confidence",
+    "field_x",
+    "field_y",
+    "source"
+  ],
   "properties": {
-    "schema_version": { "type": "integer" },
-    "job_id": { "type": "string", "format": "uuid" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "job_id": { "type": "string" },
     "match_id": { "type": "string" },
     "event_id": { "type": "string" },
-    "team": { "type": ["integer", "null"] },
-    "track_id": { "type": "integer" },
-    "t_seconds": { "type": "number" },
+    "team": {
+      "type": ["integer", "null"],
+      "exclusiveMinimum": 0,
+      "description": "Null if the track was never identified. Consumers must handle null."
+    },
+    "track_id": {
+      "type": ["integer", "null"],
+      "$comment": "OPEN CONTRACT QUESTION -- see OPEN_QUESTIONS.md #1. Doc 0 lists track_id as required and non-nullable, but match_start / match_end / phase_change are not attributable to a track. Encoded as nullable here so the fixture validates; component 3 tolerates null or absent. Needs agreement before this is settled either way."
+    },
+    "t_seconds": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Float seconds, three decimal places, relative to the start of the SEGMENT."
+    },
     "phase": { "type": "string", "enum": ["auto", "teleop", "endgame", "unknown"] },
-    "event_type": { "type": "string" },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "match_start", "match_end", "phase_change",
+        "shot_attempt", "shot_made",
+        "reload",
+        "defense_start", "defense_end",
+        "immobile_start", "immobile_end",
+        "foul"
+      ]
+    },
     "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-    "field_x": { "type": ["number", "null"] },
-    "field_y": { "type": ["number", "null"] },
+    "field_x": {
+      "type": ["number", "null"],
+      "description": "Feet, origin at field center, +x toward the blue alliance wall. Null if homography failed for that frame range."
+    },
+    "field_y": {
+      "type": ["number", "null"],
+      "description": "Feet, origin at field center, +y toward the scoring table side. Null if homography failed for that frame range."
+    },
     "source": { "type": "string", "enum": ["model", "scoreboard_ocr", "tba", "manual"] }
-  },
-  "required": ["schema_version", "job_id", "match_id", "event_id", "track_id", "t_seconds", "phase", "event_type", "confidence", "source"]
+  }
 }

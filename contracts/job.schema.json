@@ -1,37 +1,133 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Job",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frc-video-scouting/contracts/job.schema.json",
+  "title": "Job record (Contract A)",
+  "description": "Produced by component 2 (ingest). Consumed by components 1 (analysis) and 3 (web).",
   "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "job_id",
+    "match_id",
+    "video_id",
+    "start_offset",
+    "status"
+  ],
   "properties": {
-    "schema_version": { "type": "integer" },
-    "job_id": { "type": "string", "format": "uuid" },
-    "match_id": { "type": "string" },
-    "video_id": { "type": "string", "minLength": 11, "maxLength": 11 },
-    "local_path": { "type": "string" },
-    "start_offset": { "type": "number" },
-    "duration": { "type": "number" },
-    "fps": { "type": "number" },
-    "width": { "type": "integer" },
-    "height": { "type": "integer" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "job_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "UUIDv4."
+    },
+    "match_id": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9]{4}[a-z0-9]+_[a-z0-9]+$",
+      "description": "TBA match key, lowercase. NULL -- not the string 'unknown' -- when component 2 could not resolve it from video metadata. Contract E: 'returns the job with match_id: null if it cannot'."
+    },
+    "video_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{11}$",
+      "description": "YouTube ID, 11 chars, case-sensitive."
+    },
+    "local_path": {
+      "type": ["string", "null"],
+      "description": "Path to the downloaded segment. Null until status reaches 'downloaded'."
+    },
+    "start_offset": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Seconds. Position of the segment start within the original video. Add to t_seconds to get original-video time. 0 when the segment is the whole video."
+    },
+    "duration": {
+      "type": ["number", "null"],
+      "exclusiveMinimum": 0,
+      "description": "Segment duration in seconds. Null until the download reports it."
+    },
+    "fps": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+    "width": { "type": ["integer", "null"], "exclusiveMinimum": 0 },
+    "height": { "type": ["integer", "null"], "exclusiveMinimum": 0 },
     "status": {
       "type": "string",
       "enum": ["queued", "downloading", "downloaded", "analyzing", "complete", "failed"]
     },
     "alliances": {
-      "type": ["object", "null"],
-      "properties": {
-        "red": { "type": "array", "items": { "type": "integer" }, "minItems": 3, "maxItems": 3 },
-        "blue": { "type": "array", "items": { "type": "integer" }, "minItems": 3, "maxItems": 3 }
-      },
-      "required": ["red", "blue"]
+      "description": "From TBA. Narrows bumper OCR to three candidates per side. Null when TBA has no data for the match; component 1 then falls back to raw OCR without elimination.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["red", "blue"],
+          "properties": {
+            "red": {
+              "type": "array",
+              "items": { "type": "integer", "exclusiveMinimum": 0 },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "blue": {
+              "type": "array",
+              "items": { "type": "integer", "exclusiveMinimum": 0 },
+              "minItems": 3,
+              "maxItems": 3
+            }
+          }
+        }
+      ]
     },
     "tba_score": {
-      "type": ["object", "null"],
-      "properties": {
-        "red": { "type": "integer" },
-        "blue": { "type": "integer" }
-      }
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["red", "blue"],
+          "properties": {
+            "red": { "type": "integer" },
+            "blue": { "type": "integer" }
+          }
+        }
+      ]
+    },
+    "error": {
+      "type": ["string", "null"],
+      "description": "Human-readable failure reason. Required non-null when status is 'failed' -- doc 2 treats a failed download as an expected condition, and the queue cannot offer a useful retry without saying what went wrong."
+    },
+    "progress": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Not in doc 0. Proposed: see OPEN_QUESTIONS.md #4. Component 3 reads it if present and falls back to an indeterminate bar."
+    },
+    "stage": { "type": ["string", "null"], "description": "Proposed alongside progress." },
+    "created_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "ISO 8601, UTC, Z suffix. Proposed: the queue cannot order by age without it."
     }
   },
-  "required": ["schema_version", "job_id", "match_id", "video_id", "status"]
+  "allOf": [
+    {
+      "$comment": "Media metadata is unknowable before the download completes, but must be present once it has -- component 1 cannot decode without fps/width/height and component 3 cannot lay out a player without duration.",
+      "if": {
+        "properties": { "status": { "enum": ["downloaded", "analyzing", "complete"] } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "local_path": { "type": "string" },
+          "duration": { "type": "number" },
+          "fps": { "type": "number" },
+          "width": { "type": "integer" },
+          "height": { "type": "integer" }
+        },
+        "required": ["local_path", "duration", "fps", "width", "height"]
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "failed" } }, "required": ["status"] },
+      "then": { "properties": { "error": { "type": "string" } }, "required": ["error"] }
+    }
+  ]
 }

@@ -1,0 +1,41 @@
+{
+  "key": "2026casf_qm42",
+  "comp_level": "qm",
+  "set_number": 1,
+  "match_number": 42,
+  "event_key": "2026casf",
+  "winning_alliance": "red",
+  "alliances": {
+    "red": {
+      "score": 90,
+      "team_keys": [
+        "frc254",
+        "frc1678",
+        "frc971"
+      ],
+      "surrogate_team_keys": [],
+      "dq_team_keys": []
+    },
+    "blue": {
+      "score": 60,
+      "team_keys": [
+        "frc118",
+        "frc148",
+        "frc2056"
+      ],
+      "surrogate_team_keys": [],
+      "dq_team_keys": []
+    }
+  },
+  "time": 1774028400,
+  "actual_time": 1774028733,
+  "predicted_time": 1774028400,
+  "post_result_time": 1774028901,
+  "score_breakdown": null,
+  "videos": [
+    {
+      "type": "youtube",
+      "key": "dQw4w9WgXcQ?t=120"
+    }
+  ]
+}

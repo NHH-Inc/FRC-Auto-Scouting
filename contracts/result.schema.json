@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frc-video-scouting/contracts/result.schema.json",
+  "title": "Analysis run metadata (Contract D, result.json)",
+  "description": "Written by component 1 to <out>/result.json on success. Doc 0 names the fields it carries; the key names below are this file's contribution and are the one thing here worth confirming with component 1 (see OPEN_QUESTIONS.md #2).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "box_sample_rate", "homography_ok", "model_version"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "box_sample_rate": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Hz. Box samples per second in tracks.jsonl. Component 3 interpolates between samples using this."
+    },
+    "homography_ok": { "type": "boolean", "description": "Whether field-space projection succeeded for this run." },
+    "reconstructed_score": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["red", "blue"],
+          "properties": { "red": { "type": "integer" }, "blue": { "type": "integer" } }
+        }
+      ]
+    },
+    "frames_analyzed": { "type": "integer", "minimum": 0 },
+    "frames_skipped_shot_change": { "type": "integer", "minimum": 0 },
+    "model_version": { "type": "string" }
+  }
+}

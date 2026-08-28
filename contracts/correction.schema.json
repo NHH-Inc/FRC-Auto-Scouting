@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frc-video-scouting/contracts/correction.schema.json",
+  "title": "Correction record",
+  "description": "Corrections never overwrite model output. A correction is a new row referencing the original. Reads apply corrections on top of raw events by default; ?raw=true returns uncorrected output.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["correction_id", "event_id", "action", "created_at"],
+  "properties": {
+    "correction_id": { "type": "string" },
+    "event_id": {
+      "type": "string",
+      "description": "The event this correction references. For action 'create' this is the id of the newly created event."
+    },
+    "action": { "type": "string", "enum": ["edit", "delete", "create"] },
+    "fields": {
+      "type": ["object", "null"],
+      "description": "Sparse patch of event fields. Required for 'edit' and 'create', absent or null for 'delete'."
+    },
+    "created_at": { "type": "string", "format": "date-time", "description": "ISO 8601, UTC, Z suffix." }
+  }
+}

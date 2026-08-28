@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "box_sample_rate": 5,
+  "homography_ok": true,
+  "reconstructed_score": {
+    "red": 83,
+    "blue": 64
+  },
+  "frames_analyzed": 4442,
+  "frames_skipped_shot_change": 118,
+  "model_version": "fixture-synthetic-0.1.0"
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frc-video-scouting/contracts/tracks.schema.json",
+  "title": "Track record (Contract C)",
+  "description": "Produced by component 1 alongside events. This is what draws the boxes. Written to tracks.jsonl, one object per track. Transcribed from doc 0 Contract C -- no fields added.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "track_id", "team", "alliance", "boxes"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "track_id": { "type": "integer", "description": "Unique within a job only." },
+    "team": { "type": ["integer", "null"], "exclusiveMinimum": 0 },
+    "alliance": { "type": ["string", "null"], "enum": ["red", "blue", null] },
+    "boxes": {
+      "type": "array",
+      "description": "Sample rate need not match video frame rate. Component 3 interpolates between samples; the rate is stated in result.json as box_sample_rate.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["t", "x", "y", "w", "h"],
+        "properties": {
+          "t": { "type": "number", "minimum": 0, "description": "Seconds from segment start." },
+          "x": { "type": "number", "description": "Top-left corner, normalized image space 0..1." },
+          "y": { "type": "number", "description": "Top-left corner, normalized image space 0..1." },
+          "w": { "type": "number", "exclusiveMinimum": 0 },
+          "h": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    }
+  }
+}
