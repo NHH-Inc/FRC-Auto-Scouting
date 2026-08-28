@@ -1,59 +1,104 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, JSON, DateTime, Text
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declarative_base
 import datetime
 import uuid
 
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, JSON, String
+from sqlalchemy.orm import declarative_base
+
 Base = declarative_base()
 
+
+def utcnow():
+    """Timezone-aware UTC. Doc 0 wants ISO 8601 with a Z suffix, which needs real tzinfo."""
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
 class Job(Base):
+    """Contract A."""
+
     __tablename__ = "jobs"
+
     job_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    schema_version = Column(Integer, default=1)
-    match_id = Column(String, nullable=True)
+    schema_version = Column(Integer, default=1, nullable=False)
+    # Nullable on purpose: Contract E says an unresolved match comes back as null. Never the
+    # string "unknown" -- that is not a valid TBA key and every unresolved job would collide.
+    match_id = Column(String, nullable=True, index=True)
     video_id = Column(String(11), nullable=False)
     local_path = Column(String, nullable=True)
-    start_offset = Column(Float, default=0.0)
+    start_offset = Column(Float, default=0.0, nullable=False)
+    # Unknowable until the download reports them; required from status 'downloaded' onward.
+    # See contracts/job.schema.json, which encodes that conditionally.
     duration = Column(Float, nullable=True)
     fps = Column(Float, nullable=True)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
-    status = Column(String, default="queued") # queued, downloading, downloaded, analyzing, complete, failed
+    status = Column(String, default="queued", nullable=False)
     alliances = Column(JSON, nullable=True)
     tba_score = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    # Doc 2 treats a failed download as an expected condition, and doc 3 wants a retry path.
+    # A retry the user cannot reason about is not much of a path, so keep the reason.
+    error = Column(String, nullable=True)
+    # Contract D has component 1 stream progress so "component 2 can show a progress bar" --
+    # but component 3 is what draws it, so it has to survive to the job record.
+    progress = Column(Float, nullable=True)
+    stage = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+
 
 class Event(Base):
+    """Contract B. Raw model output ONLY.
+
+    Doc 0: "events stores raw model output only" and "Corrections never overwrite model
+    output." Nothing in this service may UPDATE a row in this table. Corrections go to the
+    corrections table and are applied on read.
+    """
+
     __tablename__ = "events"
+
     event_id = Column(String, primary_key=True)
-    schema_version = Column(Integer, default=1)
-    job_id = Column(String, ForeignKey("jobs.job_id"))
+    schema_version = Column(Integer, default=1, nullable=False)
+    job_id = Column(String, ForeignKey("jobs.job_id"), index=True)
     match_id = Column(String, index=True)
     team = Column(Integer, nullable=True)
-    track_id = Column(Integer)
-    t_seconds = Column(Float)
-    phase = Column(String) # auto, teleop, endgame, unknown
-    event_type = Column(String)
-    confidence = Column(Float)
+    # Nullable: match_start / match_end / phase_change belong to no track.
+    # See contracts/OPEN_QUESTIONS.md #1.
+    track_id = Column(Integer, nullable=True)
+    t_seconds = Column(Float, nullable=False)
+    phase = Column(String, nullable=False)
+    event_type = Column(String, nullable=False)
+    confidence = Column(Float, nullable=False)
     field_x = Column(Float, nullable=True)
     field_y = Column(Float, nullable=True)
-    source = Column(String) # model, scoreboard_ocr, tba, manual
-    raw = Column(Boolean, default=True)
+    source = Column(String, nullable=False)
+
 
 class Track(Base):
+    """Contract C.
+
+    match_id is denormalised from the job so the tracks endpoint can filter by it. Contract C
+    itself has no match_id field, so it MUST be taken from the job record -- reading it off
+    the track JSON yields NULL for every row and the endpoint then returns nothing forever.
+    """
+
     __tablename__ = "tracks"
+
     id = Column(Integer, primary_key=True, autoincrement=True)
-    job_id = Column(String, ForeignKey("jobs.job_id"))
+    job_id = Column(String, ForeignKey("jobs.job_id"), index=True)
     match_id = Column(String, index=True)
-    track_id = Column(Integer)
+    track_id = Column(Integer, nullable=False)
     team = Column(Integer, nullable=True)
-    alliance = Column(String) # red, blue
-    boxes = Column(JSON) # List of boxes
+    alliance = Column(String, nullable=True)
+    boxes = Column(JSON, nullable=False)
+
 
 class Correction(Base):
+    """A correction references an event; it never replaces one."""
+
     __tablename__ = "corrections"
+
     correction_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    event_id = Column(String, ForeignKey("events.event_id"))
-    action = Column(String) # edit, delete, create
-    fields = Column(JSON)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    event_id = Column(String, index=True, nullable=False)
+    # Denormalised so corrections for a match can be fetched without joining every event.
+    match_id = Column(String, index=True, nullable=True)
+    action = Column(String, nullable=False)  # edit | delete | create
+    fields = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)

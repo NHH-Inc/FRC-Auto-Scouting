@@ -6,3 +6,4 @@ pydantic
 sqlalchemy
 psycopg2-binary
 python-multipart
+httpx
