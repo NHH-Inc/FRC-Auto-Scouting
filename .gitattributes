@@ -1,0 +1,11 @@
+# The fixture generator is deterministic and its output is compared byte for byte, so the
+# golden data must not pick up CRLF on a Windows checkout.
+*.jsonl text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.py    text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.mjs   text eol=lf
+
+*.mp4 binary
