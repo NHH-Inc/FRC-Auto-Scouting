@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Event",
+  "type": "object",
+  "properties": {
+    "schema_version": { "type": "integer" },
+    "job_id": { "type": "string", "format": "uuid" },
+    "match_id": { "type": "string" },
+    "event_id": { "type": "string" },
+    "team": { "type": ["integer", "null"] },
+    "track_id": { "type": "integer" },
+    "t_seconds": { "type": "number" },
+    "phase": { "type": "string", "enum": ["auto", "teleop", "endgame", "unknown"] },
+    "event_type": { "type": "string" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "field_x": { "type": ["number", "null"] },
+    "field_y": { "type": ["number", "null"] },
+    "source": { "type": "string", "enum": ["model", "scoreboard_ocr", "tba", "manual"] }
+  },
+  "required": ["schema_version", "job_id", "match_id", "event_id", "track_id", "t_seconds", "phase", "event_type", "confidence", "source"]
+}

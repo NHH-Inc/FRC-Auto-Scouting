@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+yt-dlp
+requests
+pydantic
+sqlalchemy
+psycopg2-binary
+python-multipart

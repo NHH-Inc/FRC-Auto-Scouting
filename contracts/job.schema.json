@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Job",
+  "type": "object",
+  "properties": {
+    "schema_version": { "type": "integer" },
+    "job_id": { "type": "string", "format": "uuid" },
+    "match_id": { "type": "string" },
+    "video_id": { "type": "string", "minLength": 11, "maxLength": 11 },
+    "local_path": { "type": "string" },
+    "start_offset": { "type": "number" },
+    "duration": { "type": "number" },
+    "fps": { "type": "number" },
+    "width": { "type": "integer" },
+    "height": { "type": "integer" },
+    "status": {
+      "type": "string",
+      "enum": ["queued", "downloading", "downloaded", "analyzing", "complete", "failed"]
+    },
+    "alliances": {
+      "type": ["object", "null"],
+      "properties": {
+        "red": { "type": "array", "items": { "type": "integer" }, "minItems": 3, "maxItems": 3 },
+        "blue": { "type": "array", "items": { "type": "integer" }, "minItems": 3, "maxItems": 3 }
+      },
+      "required": ["red", "blue"]
+    },
+    "tba_score": {
+      "type": ["object", "null"],
+      "properties": {
+        "red": { "type": "integer" },
+        "blue": { "type": "integer" }
+      }
+    }
+  },
+  "required": ["schema_version", "job_id", "match_id", "video_id", "status"]
+}
