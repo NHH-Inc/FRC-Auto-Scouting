@@ -120,8 +120,27 @@ class SheetsExporter:
             return ""
         return f"https://docs.google.com/spreadsheets/d/{self.spreadsheet_id}/edit"
 
+    def _ensure_tab(self, service, tab: str) -> None:
+        """Create the tab if it is missing.
+
+        Without this the first export fails on a bad range, and the fix would be "go and add a
+        tab named exactly `aggregates` by hand" -- a setup step nobody would remember. Costs one
+        metadata read; the write only happens the first time.
+        """
+        meta = service.get(spreadsheetId=self.spreadsheet_id).execute()
+        titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
+        if tab in titles:
+            return
+        service.batchUpdate(
+            spreadsheetId=self.spreadsheet_id,
+            body={"requests": [{"addSheet": {"properties": {"title": tab}}}]},
+        ).execute()
+
     def export(self, mode: str, headers: list, rows: list) -> dict:
-        """Two API calls: read the existing sheet, then write the merged result.
+        """Reads the existing sheet, then writes the merged result.
+
+        A small constant number of API calls regardless of row count -- doc 3's concern is
+        per-row calls, which hit quota immediately.
 
         Returns {rows_written, rows_skipped}. `rows_skipped` counts rows that were already
         present and unchanged -- the visible proof that a second export did not duplicate.
@@ -131,6 +150,7 @@ class SheetsExporter:
 
         tab = "raw_events" if mode == "raw" else "aggregates"
         service = self._client().spreadsheets()
+        self._ensure_tab(service, tab)
 
         try:
             existing = (

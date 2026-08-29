@@ -29,13 +29,11 @@ keeps the accuracy comparison honest about what the pipeline actually knows.
 
 ## Labelling pipeline
 
-**D1 — Nathaniel's model is treated as a classifier.** `default`
-Team ID from a robot crop, which makes the crop step in the ensemble plan correct. If it turns
-out to be a detector the crop step has to go: a detector learns from (image, box) pairs and
-cropping deletes the box.
-
-Nathaniel is shenj, who owns component 1 — so this is one question to a person already in the
-loop, not an external dependency. Still the last unconfirmed assumption in the labelling plan.
+**D1 — Nathaniel's model is a classifier.** `settled` (Nathaniel)
+Team ID from a robot crop. He was not attached to either answer and asked us to pick, so:
+classifier. That makes the crop step in the ensemble plan correct as written, and it means the
+detector and the team-ID model are trained from different data — boxes for one, crops for the
+other.
 
 **D2 — Consensus is intersection-over-union, not coordinate averaging.** `settled` (Robert)
 Per-model raw results are retained for auditing. Averaging fails silently — one model missing
@@ -118,3 +116,61 @@ required output, and reporting a write that never happened is worse than refusin
 against the golden fixture. This exists because component 1 was brought to SCHEMA_VERSION 2 by
 someone with no C++ toolchain and sat in main unverified — nobody should need a local toolchain
 to find out whether the C++ compiles.
+
+## Hardware
+
+**H1 — Justin runs the ingest service, the labelling pass, and the web app.** `settled`
+Ryzen 7 7800X3D, 32 GB DDR5-6000, Radeon RX 7800 XT (16 GB), ~107 GB free.
+
+He does **not** train. PyTorch has no AMD support on Windows — the ROCm wheels are Linux-only —
+so the 7800 XT cannot train there regardless of how capable the silicon is. Ollama *does*
+support RDNA3 on Windows (gfx1101), so the three VLMs run GPU-accelerated for labelling, and
+16 GB VRAM holds all three at once.
+
+**H2 — Robert trains.** `settled`
+RTX 3060, ~40 GB free. CUDA, so the whole PyTorch ecosystem just works. Confirm whether it is
+the 12 GB or 8 GB card: 12 GB fine-tunes a detector at 640px comfortably, 8 GB needs smaller
+batches and gradient accumulation.
+
+40 GB free is the constraint, not the GPU. It is another reason the dataset lives on Roboflow
+(D8) rather than as local copies on three machines.
+
+**H3 — Nobody has a usable Linux machine.** `settled`
+Justin's is an i3 with 8 GB DDR4, which rules out ROCm training on his 7800 XT. Not worth
+dual-booting for while Robert's CUDA box exists.
+
+**H4 — Disk is the binding constraint, on every machine.** `settled`
+107 GB free on Justin's box, 40 GB on Robert's. Doc 2: a single event's footage is tens of GB.
+
+This is why D6 and D9 are not optimisations:
+
+| | Size |
+|---|---|
+| Full 6-hour event VOD @1080p | 15–25 GB |
+| One clipped match segment (2:30 @1080p) | 300–600 MB |
+| 100k labelled frames as JPEGs | 20–50 GB |
+| 100k frames as references + boxes | ~15 MB |
+
+Clipping match windows instead of whole VODs is what makes this fit at all. Also note Justin's
+drive is a DRAM-less Kingston SNV3S1000G — sustained writes slow sharply once the SLC cache
+fills, so it is a working disk, not an archive.
+
+**H5 — The robotics classroom machines are a real option, but ask first.** `open`
+About 20 PCs: RTX 5070 Ti (16 GB), Ryzen 7 7700X, 32 GB DDR5, ~800 GB free, Windows 11. That is
+substantially faster than anything we own, the labelling pass is embarrassingly parallel, and
+the storage problem disappears.
+
+Three things to settle before counting on them:
+
+1. **Permission and install rights.** Ollama needs an installer, and school images are often
+   locked down or re-imaged nightly, which would wipe local state between sessions.
+2. **Do not download video on school infrastructure.** Doc 2 is explicit that bulk downloading
+   is against YouTube's terms, and accepts that tradeoff for our own machines. Running it on
+   school equipment and a school network makes it the school's problem rather than ours, which
+   is not ours to decide. Download at home; carry the segments in on a drive.
+3. **What survives a reboot.** If the machines reset, they can only do stateless GPU work —
+   which is exactly what the labelling pass is, so that is fine, but the inputs and outputs have
+   to live somewhere else.
+
+Used that way — offline, stateless, after hours, with permission — they are the best compute we
+have access to by a wide margin.
