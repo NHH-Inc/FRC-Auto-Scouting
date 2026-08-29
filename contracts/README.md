@@ -14,7 +14,7 @@ the other two.
 | `correction.schema.json` | F — corrections | v2: `scope` (event/track), `target_id` |
 | `result.schema.json` | D — `result.json` metadata | key names now pinned by doc 0 |
 | `seasons/<year>.json` | field, periods, point values | per year, selected by `job.season` |
-| `OPEN_QUESTIONS.md` | — | **all thirteen resolved in v2** |
+| `OPEN_QUESTIONS.md` | — | v2 questions resolved; **one open (#14)** |
 
 Doc 0 names `events.schema.json`, `job.schema.json` and `enums.md`. The other files are
 transcriptions of contracts that doc 0 states normatively in prose (Contract C, the

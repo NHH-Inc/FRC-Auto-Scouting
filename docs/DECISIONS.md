@@ -1,0 +1,94 @@
+# Decision log
+
+Project decisions that are not contract changes. Each one is reversible; they are written
+down so that changing one is a conversation about that one thing rather than an archaeology
+dig through Discord.
+
+Contract changes do **not** belong here — those go through `contracts/OPEN_QUESTIONS.md` and
+need all three people, per doc 0.
+
+| Status | Meaning |
+|---|---|
+| **settled** | A person decided it. |
+| **default** | Nobody had a preference, so the recommended option was taken. Overrule freely. |
+| **blocked** | Decided, but waiting on an action only a human can take. |
+
+---
+
+## Labelling pipeline
+
+**D1 — Nathaniel's model is treated as a classifier.** `default`
+Team ID from a robot crop, which makes the crop step in the ensemble plan correct. If it turns
+out to be a detector the crop step has to go: a detector learns from (image, box) pairs and
+cropping deletes the box. Confirm with Nathaniel; nothing else depends on it.
+
+**D2 — Consensus is intersection-over-union, not coordinate averaging.** `settled` (Robert)
+Per-model raw results are retained for auditing. Averaging fails silently — one model missing
+the robot drags the box onto empty carpet with nothing in the output to show it. IoU consensus
+can at least report that the models disagreed.
+
+**D3 — Model stack: `qwen3-vl:4b`, `qwen2.5vl:7b`, `gemma3:4b`.** `settled` (Robert)
+Run sequentially so they fit in memory, ~12–13 GB on disk. No Ultralytics, so doc 1's AGPL
+concern does not arise. Two of the three share a family, so `gemma3` carries all of the actual
+diversity — see the open measurement below.
+
+**D4 — The correction UI is the label source for team identification.** `default`
+Every track re-attribution is already a human-confirmed (track → team) pair, reviewed by
+construction, and it grows as people scout. The ensemble still earns its place for robot
+*detection*, where there are no human-labelled boxes at all.
+
+**D5 — v1 trains on unreviewed auto-labels for detection.** `default`
+Accepted with eyes open: the first detector is capped at roughly the ensemble's quality,
+because that is what generated its labels. Doc 1's hand-correction step is skipped for v1 and
+picked up when Roboflow is in place (D8).
+
+**Open measurement — is `gemma3:4b` contributing a real vote?**
+The two Qwen-VL models are trained for grounding; Gemma 3 takes image input but is not trained
+for bounding-box grounding the same way. If it rarely agrees, a 2-of-3 quorum quietly becomes
+"the two Qwens agreed", which is close to one family voting twice. The per-model raw results
+already being kept make this ~20 minutes of work: take 50 frames, measure each model's IoU
+against the fused box, compare agreement rates.
+
+Related: start the IoU threshold around **0.4**, not the usual 0.5. A robot in a wide field
+shot is often under 5% of frame width, and IoU is harsh on small objects — at that scale a few
+pixels of honest disagreement drops a genuine match below 0.5.
+
+## Training data storage
+
+**D6 — Store references, not frames.** `default`
+`(video_id, start_offset, frame_number)` plus boxes; regenerate frames with ffmpeg at training
+time. For 100k labelled frames that is ~15 MB instead of 20–50 GB, small enough to live in git
+and be reviewed in pull requests. Same principle doc 2 already commits to: media is a cache,
+not a record.
+
+**D7 — Materialised crops go in sharded archives.** `default`
+~10k images per shard, WebDataset layout. Many-small-files is what kills every backend, not the
+byte count: 100k crops at ~6 KB is only ~600 MB, trivial as ten shards and painful as 100,000
+files.
+
+**D8 — Roboflow free tier for the dataset and review UI.** `default`
+It doubles as the hand-correction step D5 defers, and exports YOLO/COCO. Not Google Drive:
+per-file API overhead, rate limits, no random access, no content addressing. Cloudflare R2 is
+the fallback if we outgrow it (S3-compatible, zero egress fees). Not Git LFS — 1 GB quota.
+
+**D9 — Segments are deleted once analysed, with a 7-day grace window.** `default`
+Safe because the events are the product and they live in the database. Doc 2: "set a retention
+policy early or disk usage will get out of hand fast" — a single event's footage is tens of GB.
+Deleting a job already removes its segment, so this is a scheduled sweep, not new machinery.
+
+## Operations
+
+**D10 — TBA key lives in `ingest/.env`, never committed.** `blocked`
+See `ingest/.env.example`. Keys are free from thebluealliance.com/account. Someone still has to
+create one; the code is written and inert until then.
+
+**D11 — Robert owns the export spreadsheet.** `settled` (Robert)
+Needs a Google Cloud service account, its JSON key, and the sheet shared with that service
+account's email. Until `SHEETS_SPREADSHEET_ID` and `GOOGLE_APPLICATION_CREDENTIALS` are both
+set, the export endpoint returns 503 rather than claiming a write that did not happen.
+
+**D12 — CI compiles component 1; MSVC + vcpkg for local Windows builds.** `default`
+`.github/workflows/ci.yml` builds `analysis/` on every push and runs a Contract D smoke test
+against the golden fixture. This exists because component 1 was brought to SCHEMA_VERSION 2 by
+someone with no C++ toolchain and sat in main unverified — nobody should need a local toolchain
+to find out whether the C++ compiles.

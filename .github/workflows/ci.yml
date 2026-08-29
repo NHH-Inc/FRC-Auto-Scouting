@@ -1,0 +1,157 @@
+# CI for all three components.
+#
+# This exists because of Q12: component 1 was brought to SCHEMA_VERSION 2 by someone with no
+# C++ toolchain, so it sat in main unverified. Nobody should need a local toolchain to find
+# out whether the C++ compiles -- that is what CI is for.
+#
+# Each component is its own job so a failure names the component that broke.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  analysis:
+    name: analysis (C++)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S analysis -B analysis/build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build analysis/build --config Release -j
+
+      # Contract D: the binary must accept --job, --season and --out, and must fail loudly
+      # with an error_code on the last line of stderr rather than silently doing nothing.
+      - name: Contract D smoke
+        run: |
+          set -e
+          BIN=$(find analysis/build -name analysis -type f -perm -u+x | head -1)
+          echo "binary: $BIN"
+
+          echo "-- missing arguments must exit nonzero"
+          if "$BIN" --job nope.json --out /tmp/out; then
+            echo "FAIL: exited 0 without --season"; exit 1
+          fi
+
+          echo "-- runs against the golden fixture"
+          mkdir -p /tmp/out
+          "$BIN" --job fixtures/2026casf_qm42/job.json \
+                 --season contracts/seasons/2026.json \
+                 --out /tmp/out
+          test -f /tmp/out/events.jsonl
+          test -f /tmp/out/tracks.jsonl
+          test -f /tmp/out/result.json
+
+          echo "-- result.json carries Contract D's pinned keys"
+          python3 - <<'PY'
+          import json
+          r = json.load(open("/tmp/out/result.json"))
+          required = {
+              "schema_version", "job_id", "model_version", "box_sample_rate", "homography_ok",
+              "frames_total", "frames_analyzed", "frames_skipped_shot_change",
+              "tracks_emitted", "events_emitted", "reconstructed_score",
+              "started_at", "finished_at",
+          }
+          missing = required - set(r)
+          assert not missing, f"result.json missing {sorted(missing)}"
+          assert r["schema_version"] == 2, r["schema_version"]
+          print("result.json ok")
+          PY
+
+          echo "-- emitted events satisfy Contract B"
+          python3 - <<'PY'
+          import json
+          rows = [json.loads(l) for l in open("/tmp/out/events.jsonl") if l.strip()]
+          assert rows, "no events emitted"
+          required = {
+              "schema_version", "job_id", "match_id", "event_id", "team", "track_id",
+              "t_seconds", "phase", "event_type", "confidence", "field_x", "field_y", "source",
+          }
+          for e in rows:
+              missing = required - set(e)
+              assert not missing, f"event missing {sorted(missing)}"
+              assert e["schema_version"] == 2
+              # Nullable fields must be PRESENT as null, not dropped -- this is what the
+              # std::optional adl_serializer exists to guarantee.
+              if e["event_type"] in {"match_start", "match_end", "phase_change"}:
+                  assert e["team"] is None and e["track_id"] is None, e
+          print(f"{len(rows)} events ok")
+          PY
+
+  ingest:
+    name: ingest (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ingest/requirements.txt pytest
+
+      - name: Unit tests
+        run: python -m pytest ingest/tests -q
+
+      # Drives every Contract E endpoint against the golden fixtures. No network, no yt-dlp,
+      # no analysis binary.
+      - name: Contract E smoke
+        run: python -m ingest.smoke_test
+
+  web:
+    name: web (TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        working-directory: web
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: web
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: web
+        run: npm run build
+
+      # Doc 0: "If your component works against the fixtures, it will work against the
+      # others." Also fails if any of the five required awkward cases stops being covered.
+      - name: Validate fixtures
+        working-directory: web
+        run: npm run validate:fixtures
+
+  fixtures:
+    name: fixtures are reproducible
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The generator is deterministic, so regenerating must be a no-op. If this fails,
+      # someone hand-edited the golden data instead of changing the generator.
+      - name: Regenerate and diff
+        run: |
+          node fixtures/tools/generate_fixture.mjs --no-video
+          if ! git diff --quiet -- fixtures; then
+            echo "Fixture JSON changed after regeneration:"
+            git --no-pager diff --stat -- fixtures
+            exit 1
+          fi
+          echo "fixtures reproduce byte-for-byte"

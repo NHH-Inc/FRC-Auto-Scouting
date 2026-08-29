@@ -4,7 +4,7 @@
 are in the changelog at the bottom of `docs/frc-scouting-0-contract.md`, which is normative.
 This file is kept as the place to raise the *next* one.
 
-## Status: none open
+## Status: one open (#14)
 
 | # | Question | Ruling |
 |---|---|---|
@@ -39,3 +39,33 @@ The threshold heuristic that stood in for #8 (`MAX_INTERPOLATION_GAP_PERIODS` in
 Doc 0: *"Anything that feels like it needs a new shared field is a contract change. Raise it
 instead of adding it locally."* Add it here with a provisional stance, keep the stance
 isolated to one file, and bump `SCHEMA_VERSION` only once all three agree.
+
+
+---
+
+## Open
+
+### 14. `shot_made` does not say which goal it went in
+
+The season config prices goals separately (`shot_made_high` / `shot_made_low`), but
+`event_type` is a closed set with no goal field, so an event cannot say where the piece went.
+Score reconstruction currently reads the *high* value for every made shot, in both
+`ingest/stats.py` and `web/src/lib/stats.ts`.
+
+**Agreed design (Robert + Justin): Option A.** Add an optional `goal` field to Contract B —
+additive, backward compatible, and doc 0 says additive changes "bump the version and stay
+backward compatible". The alternatives were splitting `shot_made` into per-goal event types
+(a bigger change for the same information) or collapsing to one value per phase (wrong the
+moment a game prices goals differently).
+
+**Not applied, deliberately, on two counts.**
+
+1. Doc 0 requires all three people for a contract change, and whoever owns component 1 has
+   not weighed in. Two of three delegating is not three agreeing.
+2. It has no effect yet. Every point value in `contracts/seasons/2026.json` is a zero
+   placeholder, and the *goal names* themselves are placeholders for a game that is not
+   public. Adding a field whose legal values we cannot specify is premature.
+
+**Trigger:** apply it when the 2026 game is public and the real goal names are known — the
+same change that replaces the placeholder point values. Doing both at once is one migration
+instead of two.
