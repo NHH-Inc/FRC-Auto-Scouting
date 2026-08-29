@@ -188,3 +188,23 @@ review on Roboflow, detector and team-ID classifier trained separately from diff
 The analysis binary compiles and satisfies Contract D, but has no detection pipeline, so a real
 job runs to `analysis_failed` and the player shows video with no boxes. Everything downstream is
 running on fixtures until this lands.
+
+## Ownership
+
+**O1 — Robert takes component 1 as well.** `settled`
+Nathaniel is busy, so the C++ analysis backend moves to Robert. He now owns components 1 and 2:
+detection/tracking/OCR, and the ingest service he already built. Justin keeps component 3 plus
+running the ingest service in practice.
+
+Doc 0's table still lists component 1 against Nathaniel; this entry supersedes it. Everything
+else about the boundary is unchanged — component 1 is still a command-line binary that reads
+files and writes files, still must not touch the database or the network, and still talks to
+nobody except through Contract D.
+
+Practical consequence: Robert is now on both sides of the Contract D boundary. That makes it
+easy to "just make them match" instead of following the contract. Don't. Component 3 is written
+against doc 0, and CI checks the binary's output against it independently.
+
+**O2 — Human review and detector training are unassigned.** `open`
+Roboflow is decided (D8) and Robert's 12 GB card is the training box (H2), but nobody's name is
+on either task. "We decided Roboflow" and "someone set up Roboflow" are different states.
