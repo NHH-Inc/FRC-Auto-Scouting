@@ -1,4 +1,4 @@
-# Enums, identifiers and units — SCHEMA_VERSION 2
+# Enums, identifiers and units — SCHEMA_VERSION 3
 
 Transcribed from `docs/frc-scouting-0-contract.md`. That document is normative; this file is
 the machine-adjacent restatement so all three components can diff against one thing.
@@ -93,6 +93,24 @@ otherwise                                                → unknown
 ```
 
 Nobody hardcodes 15, 135 or 20.
+
+## Goal — season-scoped, not a closed set
+
+`goal` on an event says which goal a shot went into. It is the one field whose legal values
+are **not** fixed here, because they change every season: they are the `goals` array of
+`/contracts/seasons/<year>.json`, selected by the job's `season`.
+
+```
+2026  goals = high | low
+2025  goals = l1 | l2 | l3 | l4 | processor | net
+```
+
+Null means unknown, and the key is absent entirely from v2 producers — it is an optional
+additive field, so a v2 event stream stays valid. Point values are looked up as
+`point_values[phase]["shot_made_" + goal]`.
+
+Validate `goal` against the season config, not against a schema. A schema cannot know which
+season it is reading.
 
 ## Season config
 

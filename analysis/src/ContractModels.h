@@ -1,7 +1,7 @@
 #ifndef CONTRACT_MODELS_H
 #define CONTRACT_MODELS_H
 
-// Contracts A, B, C and D at SCHEMA_VERSION 2.
+// Contracts A, B, C and D at SCHEMA_VERSION 3.
 //
 // These structs mirror /contracts/*.schema.json. Doc 0 is normative; if this file and a
 // schema disagree, the schema wins. Do NOT build the event row from document 1 -- doc 1's
@@ -44,7 +44,7 @@ struct adl_serializer<std::optional<T>> {
 
 namespace frc {
 
-constexpr int SCHEMA_VERSION = 2;
+constexpr int SCHEMA_VERSION = 3;
 
 // ---------------------------------------------------------------- closed sets
 //
@@ -102,6 +102,11 @@ inline constexpr const char* kFoul = "foul";
 inline bool is_match_level(const std::string& type) {
     return type == event_type::kMatchStart || type == event_type::kMatchEnd ||
            type == event_type::kPhaseChange;
+}
+
+/** Only a shot can carry a `goal`. */
+inline bool is_shot(const std::string& type) {
+    return type == event_type::kShotAttempt || type == event_type::kShotMade;
 }
 
 // ---------------------------------------------------------------- season config
@@ -191,6 +196,14 @@ struct Event {
     double confidence = 0.0;
     std::optional<double> field_x;
     std::optional<double> field_y;
+    /**
+     * v3. Which goal a shot went into; null when unknown or not a shot.
+     *
+     * NOT a closed set in doc 0 -- legal values are the `goals` array of the season
+     * config passed via --season, because goal names change every season. Validate
+     * against that file; there is no enum here to check.
+     */
+    std::optional<std::string> goal;
     std::string source = "model";
 };
 
@@ -264,7 +277,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Job, schema_version, job_id, match_id, season
                                    created_at, updated_at, alliances, tba_score)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Event, schema_version, job_id, match_id, event_id, team,
                                    track_id, t_seconds, phase, event_type, confidence, field_x,
-                                   field_y, source)
+                                   field_y, goal, source)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Box, t, x, y, w, h)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Gap, start, end, reason)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Track, schema_version, track_id, team, alliance,

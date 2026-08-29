@@ -93,6 +93,7 @@ export function applyCorrections(
         confidence: f.confidence ?? 1,
         fieldX: f.fieldX ?? null,
         fieldY: f.fieldY ?? null,
+        goal: f.goal ?? null,
         source: 'manual',
         corrected: true,
         correctionId: c.correctionId,

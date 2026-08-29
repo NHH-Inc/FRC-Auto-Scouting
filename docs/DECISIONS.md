@@ -15,12 +15,27 @@ need all three people, per doc 0.
 
 ---
 
+## Contract
+
+**D0 — `goal` on Contract B, SCHEMA_VERSION 3.** `settled` (all three)
+An optional, nullable field saying which goal a shot went into. Deliberately **not** a closed
+set in doc 0: legal values are the season config's `goals`, because they change every
+January — 2026 is `high | low`, 2025 is `l1 | l2 | l3 | l4 | processor | net`. A doc-0 enum
+would need editing every season, which is the churn closed sets exist to avoid. Validation
+reads the season config; a schema cannot know which season it is looking at.
+
+Null means the model could not place the shot, and it scores zero rather than guessing — that
+keeps the accuracy comparison honest about what the pipeline actually knows.
+
 ## Labelling pipeline
 
 **D1 — Nathaniel's model is treated as a classifier.** `default`
 Team ID from a robot crop, which makes the crop step in the ensemble plan correct. If it turns
 out to be a detector the crop step has to go: a detector learns from (image, box) pairs and
-cropping deletes the box. Confirm with Nathaniel; nothing else depends on it.
+cropping deletes the box.
+
+Nathaniel is shenj, who owns component 1 — so this is one question to a person already in the
+loop, not an external dependency. Still the last unconfirmed assumption in the labelling plan.
 
 **D2 — Consensus is intersection-over-union, not coordinate averaging.** `settled` (Robert)
 Per-model raw results are retained for auditing. Averaging fails silently — one model missing
@@ -78,9 +93,14 @@ Deleting a job already removes its segment, so this is a scheduled sweep, not ne
 
 ## Operations
 
-**D10 — TBA key lives in `ingest/.env`, never committed.** `blocked`
-See `ingest/.env.example`. Keys are free from thebluealliance.com/account. Someone still has to
-create one; the code is written and inert until then.
+**D10 — TBA key lives in `ingest/.env`, never committed.** `settled` (Justin)
+Key created and in place; `git check-ignore` confirms `ingest/.env` cannot be committed.
+
+Verified against the live API, which caught a real bug: `find_match_for_video` was querying
+`/event/<key>/matches/simple`, and the *simple* representation omits the `videos` array — so
+video-to-match resolution could never have matched anything. Fixed to use the full endpoint.
+Now confirmed end to end: 324 events for 2024, alliances returned with the `frc` prefix
+stripped to integers, real scores, and `m_uFap-LvzU` resolving to `2024week0_f1m1`.
 
 **D11 — Robert owns the export spreadsheet.** `settled` (Robert)
 Needs a Google Cloud service account, its JSON key, and the sheet shared with that service

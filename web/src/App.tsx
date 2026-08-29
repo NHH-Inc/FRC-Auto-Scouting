@@ -228,7 +228,7 @@ export default function App() {
         )}
       </main>
 
-      {job && job.status === 'complete' && (
+      {job && job.status === 'complete' && season && (
         <EventInspector
           job={job}
           events={match.events}
@@ -242,6 +242,7 @@ export default function App() {
           onPatch={match.patchEvent}
           onDelete={match.removeEvent}
           onCreate={match.addEvent}
+          season={season}
           tracks={match.tracks}
           onPatchTrack={(trackId, team) => match.patchTrack(job.jobId, trackId, team)}
         />

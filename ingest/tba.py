@@ -120,7 +120,9 @@ class TBAClient:
         if not self.enabled or not video_id or not event_key:
             return None
         try:
-            matches = self._fetch(f"/event/{event_key}/matches/simple") or []
+            # NOT /matches/simple -- the simple representation omits `videos`, so this
+            # search would silently never match anything.
+            matches = self._fetch(f"/event/{event_key}/matches") or []
         except Exception:
             return None
         for match in matches:

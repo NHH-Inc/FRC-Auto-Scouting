@@ -1,4 +1,4 @@
-"""Aggregates and score reconstruction, SCHEMA_VERSION 2.
+"""Aggregates and score reconstruction, SCHEMA_VERSION 3.
 
 Doc 0: "Aggregates are never stored, only queried. If a stat is needed often enough to hurt,
 add a materialized view, not a column." Everything here is computed on demand from event rows.
@@ -31,17 +31,20 @@ def season_config(year: int) -> dict | None:
         return json.load(handle)
 
 
-def points_for(phase: str, cfg: dict | None) -> int:
-    """Points for one made shot in a phase.
+def points_for(phase: str, goal: str | None, cfg: dict | None) -> int:
+    """Points for one made shot in a phase, at a given goal.
 
-    `shot_made` does not say which goal it went in -- event_type is a closed set with no goal
-    field, so that would be a contract change. Until then this reads `shot_made_high`. Every
-    value is a zero placeholder anyway; doc 0: "Do not invent values to make a test pass."
+    v3 added `goal`, so this no longer assumes every shot went in the high goal. A null goal
+    means the model could not place the shot: it scores 0 rather than guessing, which keeps
+    the accuracy comparison honest about what the pipeline actually knows.
+
+    Every value is a zero placeholder until the game is public; doc 0: "Do not invent values
+    to make a test pass."
     """
-    if not cfg:
+    if not cfg or not goal:
         return 0
     group = cfg.get("point_values", {}).get(phase) or {}
-    return int(group.get("shot_made_high", 0))
+    return int(group.get(f"shot_made_{goal}", 0))
 
 
 def scoring_is_meaningful(cfg: dict | None) -> bool:
@@ -50,6 +53,13 @@ def scoring_is_meaningful(cfg: dict | None) -> bool:
         return False
     groups = cfg.get("point_values", {}).values()
     return any(v for group in groups for v in (group or {}).values())
+
+
+def legal_goals(cfg: dict | None) -> set[str] | None:
+    """Legal `goal` values for a season, or None when the season is unknown."""
+    if not cfg:
+        return None
+    return set(cfg.get("goals") or [])
 
 
 def _alliance_of(team, alliances) -> str | None:
@@ -76,7 +86,9 @@ def reconstruct_score(events: list[dict], alliances: dict | None, cfg: dict | No
         if side is None:
             continue
         if event.get("event_type") == "shot_made":
-            score[side] += points_for(event.get("phase", "unknown"), cfg)
+            score[side] += points_for(
+                event.get("phase", "unknown"), event.get("goal"), cfg
+            )
     return score
 
 

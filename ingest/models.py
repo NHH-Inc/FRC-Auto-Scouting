@@ -75,6 +75,9 @@ class Event(Base):
     confidence = Column(Float, nullable=False)
     field_x = Column(Float, nullable=True)
     field_y = Column(Float, nullable=True)
+    # v3. Which goal a shot went into; null when unknown or not a shot. NOT a closed
+    # set -- legal values are the season config's `goals`, which change every season.
+    goal = Column(String, nullable=True)
     source = Column(String, nullable=False)
 
 

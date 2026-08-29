@@ -93,6 +93,14 @@ export function phaseAt(tMatch: number, cfg: SeasonConfig): Phase {
   return 'unknown';
 }
 
+/**
+ * Legal `goal` values for a season. Doc 0 deliberately keeps these out of the enum list,
+ * because they change every January -- a closed set would need editing every season.
+ */
+export function legalGoals(cfg: SeasonConfig): ReadonlySet<string> {
+  return new Set(cfg.goals);
+}
+
 /** Field extents in feet. Origin is field centre, so these are symmetric. */
 export function fieldExtents(cfg: SeasonConfig) {
   return {

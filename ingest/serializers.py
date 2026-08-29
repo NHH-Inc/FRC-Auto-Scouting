@@ -1,4 +1,4 @@
-"""ORM rows -> the exact shapes in /contracts/, SCHEMA_VERSION 2.
+"""ORM rows -> the exact shapes in /contracts/, SCHEMA_VERSION 3.
 
 Returning SQLAlchemy models straight out of FastAPI works, but the response shape then
 silently tracks whatever the columns happen to be. These functions pin it to the contracts
@@ -10,7 +10,7 @@ snake_case throughout, per doc 0. Component 3 converts to camelCase at its own b
 
 import datetime
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def iso_z(dt: datetime.datetime | None) -> str | None:
@@ -68,6 +68,7 @@ def event_to_dict(event, corrected: bool = False, correction_id: str | None = No
         "confidence": event.confidence,
         "field_x": event.field_x,
         "field_y": event.field_y,
+        "goal": event.goal,
         "source": event.source,
         "corrected": corrected,
         "correction_id": correction_id,
@@ -105,8 +106,11 @@ def correction_to_dict(correction) -> dict:
 # Contract B field names a correction may patch.
 EVENT_FIELDS = {
     "team", "track_id", "t_seconds", "phase", "event_type",
-    "confidence", "field_x", "field_y", "source",
+    "confidence", "field_x", "field_y", "goal", "source",
 }
+
+# Only a shot can have gone into a goal.
+SHOT_EVENTS = {"shot_attempt", "shot_made"}
 
 # Closed sets from /contracts/enums.md. Doc 0: "Anything unrecognized is a bug, not a
 # fallback" -- so these are validated on the way in rather than stored and discovered later.
@@ -130,8 +134,13 @@ CORRECTION_SCOPES = {"event", "track"}
 CORRECTION_ACTIONS = {"edit", "delete", "create"}
 
 
-def validate_event_fields(fields: dict) -> list[str]:
-    """Returns a list of problems; empty means the patch is contract-legal."""
+def validate_event_fields(fields: dict, legal_goals: set[str] | None = None) -> list[str]:
+    """Returns a list of problems; empty means the patch is contract-legal.
+
+    `legal_goals` comes from the season config, not from this module -- goal names change
+    every season, which is exactly why doc 0 keeps them out of the enum list. Pass None to
+    skip the membership check when the season is not known.
+    """
     problems = []
     for key, value in fields.items():
         if key not in EVENT_FIELDS:
@@ -149,4 +158,13 @@ def validate_event_fields(fields: dict) -> list[str]:
             problems.append("confidence must be a float 0..1, never a percentage")
         if key == "team" and value is not None and not isinstance(value, int):
             problems.append("team must be an integer with no 'frc' prefix, or null")
+        if key == "goal" and value is not None:
+            if legal_goals is not None and value not in legal_goals:
+                problems.append(
+                    f"goal '{value}' is not one of this season's goals: "
+                    + ", ".join(sorted(legal_goals))
+                )
+            event_type = fields.get("event_type")
+            if event_type is not None and event_type not in SHOT_EVENTS:
+                problems.append(f"'{event_type}' cannot have a goal; only shots can")
     return problems

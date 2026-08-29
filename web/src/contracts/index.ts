@@ -1,4 +1,4 @@
-// The contract layer, SCHEMA_VERSION 2. Everything component 2 sends crosses through this
+// The contract layer, SCHEMA_VERSION 3. Everything component 2 sends crosses through this
 // file and nothing else in web/ is allowed to touch a snake_case key.
 //
 // Doc 0: "snake_case in JSON, SQL, C++, and Python. camelCase only inside TypeScript,
@@ -47,7 +47,7 @@ export type GapReason = (typeof GAP_REASONS)[number];
 export type CorrectionScope = (typeof CORRECTION_SCOPES)[number];
 export type CorrectionAction = (typeof CORRECTION_ACTIONS)[number];
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /** Events that describe the match rather than a robot. team/track_id/field_* are all null. */
 export const MATCH_LEVEL_EVENTS: ReadonlySet<EventType> = new Set<EventType>([
@@ -101,6 +101,8 @@ export interface WireEvent {
   confidence: number;
   field_x: number | null;
   field_y: number | null;
+  /** v3, optional. Absent from v2 producers; legal values come from the season config. */
+  goal?: string | null;
   source: string;
   /** Read-only annotations the API adds; not part of the stored Contract B record. */
   corrected?: boolean;
@@ -172,6 +174,12 @@ export interface ScoutEvent {
   confidence: number;
   fieldX: number | null;
   fieldY: number | null;
+  /**
+   * Which goal a shot went into. Null when unknown or when the event is not a shot.
+   * NOT a closed set -- legal values are the season config's `goals`, because they change
+   * every season. Validate against that, never against a hardcoded list.
+   */
+  goal: string | null;
   source: Source;
   /** Whether a human has touched this row. Independent of `source`. */
   corrected: boolean;
@@ -328,6 +336,7 @@ export function parseEvent(raw: WireEvent, log: ViolationLog): ScoutEvent | null
     confidence: raw.confidence,
     fieldX: raw.field_x ?? null,
     fieldY: raw.field_y ?? null,
+    goal: raw.goal ?? null,
     source,
     corrected: raw.corrected === true,
     correctionId: raw.correction_id ?? null,
@@ -398,6 +407,7 @@ const EVENT_KEY_MAP: Record<string, keyof WireEvent> = {
   confidence: 'confidence',
   fieldX: 'field_x',
   fieldY: 'field_y',
+  goal: 'goal',
   source: 'source',
 };
 const WIRE_KEY_MAP = Object.fromEntries(
@@ -437,6 +447,7 @@ export function eventToWire(e: ScoutEvent): WireEvent {
     confidence: e.confidence,
     field_x: e.fieldX,
     field_y: e.fieldY,
+    goal: e.goal,
     source: e.source,
   };
 }

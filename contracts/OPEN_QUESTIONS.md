@@ -4,7 +4,7 @@
 are in the changelog at the bottom of `docs/frc-scouting-0-contract.md`, which is normative.
 This file is kept as the place to raise the *next* one.
 
-## Status: one open (#14)
+## Status: none open
 
 | # | Question | Ruling |
 |---|---|---|
@@ -43,29 +43,25 @@ isolated to one file, and bump `SCHEMA_VERSION` only once all three agree.
 
 ---
 
-## Open
+## Resolved after v2
 
-### 14. `shot_made` does not say which goal it went in
+### 14. `shot_made` did not say which goal it went in — RESOLVED in v3
 
-The season config prices goals separately (`shot_made_high` / `shot_made_low`), but
-`event_type` is a closed set with no goal field, so an event cannot say where the piece went.
-Score reconstruction currently reads the *high* value for every made shot, in both
-`ingest/stats.py` and `web/src/lib/stats.ts`.
+The season config prices goals separately, but `event_type` is a closed set with no goal
+field, so an event could not say where the piece went. Score reconstruction read the *high*
+value for every made shot.
 
-**Agreed design (Robert + Justin): Option A.** Add an optional `goal` field to Contract B —
-additive, backward compatible, and doc 0 says additive changes "bump the version and stay
-backward compatible". The alternatives were splitting `shot_made` into per-goal event types
-(a bigger change for the same information) or collapsing to one value per phase (wrong the
-moment a game prices goals differently).
+**Resolved: optional `goal` field on Contract B, SCHEMA_VERSION 3.** Additive, so a v2
+producer that omits it stays valid and v3 consumers treat absent as null.
 
-**Not applied, deliberately, on two counts.**
+The part worth keeping in mind: `goal` is deliberately **not** a closed set in doc 0. Its
+legal values are the `goals` array of the season config, because they change every season —
+2026 is `high | low`, 2025 is `l1 | l2 | l3 | l4 | processor | net`. A doc-0 enum would have
+to be edited every January, which is exactly the churn closed sets exist to avoid. Validation
+happens against the season config instead.
 
-1. Doc 0 requires all three people for a contract change, and whoever owns component 1 has
-   not weighed in. Two of three delegating is not three agreeing.
-2. It has no effect yet. Every point value in `contracts/seasons/2026.json` is a zero
-   placeholder, and the *goal names* themselves are placeholders for a game that is not
-   public. Adding a field whose legal values we cannot specify is premature.
+**Agreed by all three: Justin, Robert and Nathaniel (shenj).** Doc 0's requirement for a
+contract change is met, so SCHEMA_VERSION 3 is legitimate rather than provisional.
 
-**Trigger:** apply it when the 2026 game is public and the real goal names are known — the
-same change that replaces the placeholder point values. Doing both at once is one migration
-instead of two.
+The change is additive, so a producer emitting no `goal` stays valid — which is what kept the
+tree working between the version bump and each component catching up.

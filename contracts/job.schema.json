@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://frc-video-scouting/contracts/job.schema.json",
-  "title": "Job record (Contract A, v2)",
+  "title": "Job record (Contract A, v3)",
   "description": "Produced by component 2. Consumed by components 1 and 3.",
   "type": "object",
   "additionalProperties": true,
@@ -12,7 +12,7 @@
     "alliances", "tba_score"
   ],
   "properties": {
-    "schema_version": { "type": "integer", "const": 2 },
+    "schema_version": { "type": "integer", "const": 3 },
     "job_id": { "type": "string", "format": "uuid" },
     "match_id": {
       "type": ["string", "null"],

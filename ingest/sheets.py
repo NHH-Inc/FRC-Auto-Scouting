@@ -28,7 +28,8 @@ AGGREGATE_HEADERS = [
 
 RAW_HEADERS = [
     "row_key", "match_id", "event_id", "team", "track_id", "t_seconds",
-    "phase", "event_type", "confidence", "field_x", "field_y", "source", "corrected",
+    "phase", "event_type", "goal", "confidence", "field_x", "field_y", "source",
+    "corrected",
 ]
 
 
@@ -61,6 +62,7 @@ def _raw_row(event: dict) -> list:
         event.get("t_seconds"),
         event.get("phase"),
         event.get("event_type"),
+        event.get("goal"),
         event.get("confidence"),
         event.get("field_x"),
         event.get("field_y"),

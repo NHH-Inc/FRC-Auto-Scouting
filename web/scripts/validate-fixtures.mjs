@@ -1,4 +1,4 @@
-// Validates every fixture against /contracts/*.schema.json at SCHEMA_VERSION 2.
+// Validates every fixture against /contracts/*.schema.json at SCHEMA_VERSION 3.
 //
 // Doc 0: "If your component works against the fixtures, it will work against the others."
 // That only holds if the fixtures actually satisfy the contracts, so this checks. It also
@@ -89,6 +89,8 @@ const coverage = {
   'match-level event (track_id: null)': false,
   'failed job with an error_code': false,
   'match with alliances: null': false,
+  'a shot with a goal': false,
+  'a shot whose goal is unknown': false,
 };
 
 for (const dir of dirs) {
@@ -149,6 +151,14 @@ for (const dir of dirs) {
     }
   }
 
+  // Legal goal names come from the job's season config, not from a schema -- a schema
+  // cannot know which season it is reading.
+  const seasonCfg = JSON.parse(
+    readFileSync(join(CONTRACTS, 'seasons', `${job.season}.json`), 'utf8')
+  );
+  const legalGoals = new Set(seasonCfg.goals ?? []);
+  const SHOTS = new Set(['shot_attempt', 'shot_made']);
+
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const ids = new Set();
   const MATCH_LEVEL = new Set(['match_start', 'match_end', 'phase_change']);
@@ -160,6 +170,20 @@ for (const dir of dirs) {
     if (e.match_id !== job.match_id) problems.push(`event ${e.event_id} has a foreign match_id`);
     if (job.duration != null && e.t_seconds > job.duration) {
       problems.push(`event ${e.event_id} is past the segment end`);
+    }
+    if (e.goal != null) {
+      if (!legalGoals.has(e.goal)) {
+        problems.push(
+          `event ${e.event_id} has goal "${e.goal}", not in season ${job.season}: ` +
+            [...legalGoals].join(' | ')
+        );
+      }
+      if (!SHOTS.has(e.event_type)) {
+        problems.push(`${e.event_type} ${e.event_id} carries a goal but is not a shot`);
+      }
+      coverage['a shot with a goal'] = true;
+    } else if (SHOTS.has(e.event_type)) {
+      coverage['a shot whose goal is unknown'] = true;
     }
     if (MATCH_LEVEL.has(e.event_type)) {
       coverage['match-level event (track_id: null)'] = true;

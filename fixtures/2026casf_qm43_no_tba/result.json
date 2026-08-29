@@ -1,7 +1,7 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "job_id": "4b7c2e19-3d5a-4f81-9c06-8e1b2a7d5f30",
-  "model_version": "fixture-synthetic-0.2.0",
+  "model_version": "fixture-synthetic-0.3.0",
   "box_sample_rate": 5,
   "homography_ok": true,
   "frames_total": 4560,

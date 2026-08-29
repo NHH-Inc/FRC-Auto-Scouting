@@ -1,4 +1,4 @@
-// Regenerates /fixtures/ -- the worked examples doc 0 asks for, at SCHEMA_VERSION 2.
+// Regenerates /fixtures/ -- the worked examples doc 0 asks for, at SCHEMA_VERSION 3.
 //
 // Deterministic: same seed in, byte-identical JSON out (UUIDs included). Run with:
 //     node fixtures/tools/generate_fixture.mjs
@@ -41,6 +41,8 @@ const FPS = 30;
 const W = 640;
 const H = 360;
 const BOX_HZ = 5; // deliberately != FPS so component 3 must interpolate
+// Legal goal names are whatever this season declares. Never hardcode them.
+const GOALS = SEASON.goals;
 
 const FIELD_L = SEASON.field_length_ft;
 const FIELD_W = SEASON.field_width_ft;
@@ -196,11 +198,12 @@ const byTeam = (n) => ROBOTS.find((r) => r.team === n);
 
 function mk(t, type, team, trackId, conf, opts) {
   const o = opts || {};
+  const isShot = type === 'shot_attempt' || type === 'shot_made';
   const matchLevel = type === 'match_start' || type === 'match_end' || type === 'phase_change';
   const p = matchLevel || team == null ? o.pos || null : pos(team, t);
   const blind = t >= HOMOGRAPHY_GAP.from && t <= HOMOGRAPHY_GAP.to;
   return {
-    schema_version: 2,
+    schema_version: 3,
     job_id: JOB_ID,
     match_id: MATCH_ID,
     event_id: uuid(),
@@ -214,6 +217,9 @@ function mk(t, type, team, trackId, conf, opts) {
     confidence: r2(Math.min(0.99, Math.max(0.05, conf))),
     field_x: matchLevel || blind || !p ? null : r2(p.x),
     field_y: matchLevel || blind || !p ? null : r2(p.y),
+    // v3: which goal the shot went into. Null on anything that is not a shot, and null on
+    // shots the model could not place -- absent goal is legal, a wrong one is not.
+    goal: isShot ? (o.goal ?? null) : null,
     source: o.source || 'model',
   };
 }
@@ -236,9 +242,13 @@ for (const r of ROBOTS) {
     if (leg.action === 'reload') {
       events.push(mk(t, 'reload', r.team, r.track_id, 0.74 + jitter(0.14)));
     } else {
-      events.push(mk(t, 'shot_attempt', r.team, r.track_id, 0.8 + jitter(0.16)));
+      // Most shots go high; a minority go low. One in twelve is unplaced, so consumers
+      // have to handle a shot whose goal the model could not determine.
+      const roll = rnd();
+      const goal = roll < 0.08 ? null : roll < 0.75 ? GOALS[0] : GOALS[1];
+      events.push(mk(t, 'shot_attempt', r.team, r.track_id, 0.8 + jitter(0.16), { goal }));
       if (rnd() < r.acc) {
-        events.push(mk(t + 0.28, 'shot_made', r.team, r.track_id, 0.7 + jitter(0.22)));
+        events.push(mk(t + 0.28, 'shot_made', r.team, r.track_id, 0.7 + jitter(0.22), { goal }));
       }
     }
   }
@@ -250,7 +260,10 @@ events.push(mk(DEFENSE.from, 'defense_start', 2056, byTeam(2056).track_id, 0.52)
 events.push(mk(DEFENSE.to, 'defense_end', 2056, byTeam(2056).track_id, 0.47));
 events.push(mk(FOUL.t, 'foul', 148, byTeam(148).track_id, 0.41, { source: 'scoreboard_ocr' }));
 events.push(
-  mk(91.2, 'shot_attempt', null, UNKNOWN_TRACK.track_id, 0.29, { pos: unknownPos(91.2) })
+  mk(91.2, 'shot_attempt', null, UNKNOWN_TRACK.track_id, 0.29, {
+    pos: unknownPos(91.2),
+    goal: null,
+  })
 );
 
 events.sort((a, b) => a.t_seconds - b.t_seconds || a.event_type.localeCompare(b.event_type));
@@ -272,7 +285,7 @@ function sampleBoxes(fn, from, to, gaps) {
 }
 
 const tracks = ROBOTS.map((r) => ({
-  schema_version: 2,
+  schema_version: 3,
   track_id: r.track_id,
   team: r.team,
   alliance: r.alliance,
@@ -281,7 +294,7 @@ const tracks = ROBOTS.map((r) => ({
   gaps: gapsFor(r.team),
 }));
 tracks.push({
-  schema_version: 2,
+  schema_version: 3,
   track_id: UNKNOWN_TRACK.track_id,
   team: null,
   alliance: null,
@@ -305,7 +318,7 @@ const TBA = { red: 91, blue: 84 };
 writeFileSync(
   resolve(OUT, 'job.json'),
   json({
-    schema_version: 2,
+    schema_version: 3,
     job_id: JOB_ID,
     match_id: MATCH_ID,
     season: SEASON_YEAR,
@@ -336,9 +349,9 @@ const framesSkipped = Math.round((SHOT_CHANGE.end - SHOT_CHANGE.start) * FPS);
 writeFileSync(
   resolve(OUT, 'result.json'),
   json({
-    schema_version: 2,
+    schema_version: 3,
     job_id: JOB_ID,
-    model_version: 'fixture-synthetic-0.2.0',
+    model_version: 'fixture-synthetic-0.3.0',
     box_sample_rate: BOX_HZ,
     homography_ok: true,
     frames_total: framesTotal,
@@ -383,7 +396,7 @@ writeFileSync(
   resolve(OUT, 'corrections.jsonl'),
   jsonl([
     {
-      schema_version: 2,
+      schema_version: 3,
       correction_id: uuid(),
       scope: 'track',
       job_id: JOB_ID,
@@ -394,7 +407,7 @@ writeFileSync(
       created_by: 'justin',
     },
     {
-      schema_version: 2,
+      schema_version: 3,
       correction_id: uuid(),
       scope: 'event',
       job_id: JOB_ID,
@@ -405,7 +418,7 @@ writeFileSync(
       created_by: 'justin',
     },
     {
-      schema_version: 2,
+      schema_version: 3,
       correction_id: uuid(),
       scope: 'event',
       job_id: JOB_ID,
@@ -427,7 +440,7 @@ const NO_TBA_MATCH = '2026casf_qm43';
 writeFileSync(
   resolve(NO_TBA, 'job.json'),
   json({
-    schema_version: 2,
+    schema_version: 3,
     job_id: NO_TBA_JOB,
     match_id: NO_TBA_MATCH,
     season: SEASON_YEAR,
@@ -453,7 +466,7 @@ writeFileSync(
   })
 );
 const noTbaTracks = [1, 4].map((id, i) => ({
-  schema_version: 2,
+  schema_version: 3,
   track_id: id,
   team: null,
   alliance: i === 0 ? 'red' : 'blue',
@@ -463,14 +476,14 @@ const noTbaTracks = [1, 4].map((id, i) => ({
 }));
 const noTbaEvents = [
   {
-    schema_version: 2, job_id: NO_TBA_JOB, match_id: NO_TBA_MATCH, event_id: uuid(),
+    schema_version: 3, job_id: NO_TBA_JOB, match_id: NO_TBA_MATCH, event_id: uuid(),
     team: null, track_id: null, t_seconds: 0.0, phase: 'auto', event_type: 'match_start',
-    confidence: 0.96, field_x: null, field_y: null, source: 'scoreboard_ocr',
+    confidence: 0.96, field_x: null, field_y: null, goal: null, source: 'scoreboard_ocr',
   },
   {
-    schema_version: 2, job_id: NO_TBA_JOB, match_id: NO_TBA_MATCH, event_id: uuid(),
+    schema_version: 3, job_id: NO_TBA_JOB, match_id: NO_TBA_MATCH, event_id: uuid(),
     team: null, track_id: 1, t_seconds: 12.4, phase: 'auto', event_type: 'shot_made',
-    confidence: 0.55, field_x: -8.2, field_y: 1.4, source: 'model',
+    confidence: 0.55, field_x: -8.2, field_y: 1.4, goal: GOALS[0], source: 'model',
   },
 ];
 writeFileSync(resolve(NO_TBA, 'events.jsonl'), jsonl(noTbaEvents));
@@ -478,9 +491,9 @@ writeFileSync(resolve(NO_TBA, 'tracks.jsonl'), jsonl(noTbaTracks));
 writeFileSync(
   resolve(NO_TBA, 'result.json'),
   json({
-    schema_version: 2,
+    schema_version: 3,
     job_id: NO_TBA_JOB,
-    model_version: 'fixture-synthetic-0.2.0',
+    model_version: 'fixture-synthetic-0.3.0',
     box_sample_rate: BOX_HZ,
     homography_ok: true,
     frames_total: 4560,
@@ -501,7 +514,7 @@ mkdirSync(FAILED, { recursive: true });
 writeFileSync(
   resolve(FAILED, 'job.json'),
   json({
-    schema_version: 2,
+    schema_version: 3,
     job_id: 'b3f0a71c-9d24-4e6a-8c15-0f7b2e9d4a83',
     match_id: '2026casf_qm44',
     season: SEASON_YEAR,

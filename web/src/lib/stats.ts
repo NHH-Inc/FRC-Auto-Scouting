@@ -54,18 +54,20 @@ function mean(xs: number[]): number | null {
 }
 
 /**
- * Points for one made shot in a phase.
+ * Points for one made shot in a phase, at a given goal.
  *
- * `shot_made` does not say which goal it went in -- that would need a contract change, since
- * event_type is a closed set and there is no goal field. Until then this reads
- * `shot_made_high`. All point values are zero placeholders anyway; doc 0: "Do not invent
+ * v3 added `goal`, so this no longer has to assume every shot went in the high goal. A null
+ * goal means the model could not place the shot -- it scores 0 rather than guessing, which
+ * keeps the accuracy comparison honest about what the pipeline actually knows.
+ *
+ * All point values are zero placeholders until the game is public; doc 0: "Do not invent
  * values to make a test pass."
  */
-export function pointsFor(phase: Phase, cfg: SeasonConfig | null): number {
-  if (!cfg) return 0;
+export function pointsFor(phase: Phase, goal: string | null, cfg: SeasonConfig | null): number {
+  if (!cfg || !goal) return 0;
   const group = cfg.pointValues[phase];
   if (!group) return 0;
-  return group.shot_made_high ?? 0;
+  return group[`shot_made_${goal}`] ?? 0;
 }
 
 function pairedSeconds(
@@ -118,7 +120,7 @@ export function computeTeamStats(
       case 'shot_made':
         shotsMade++;
         byPhase[e.phase].made++;
-        pointsContributed += pointsFor(e.phase, cfg);
+        pointsContributed += pointsFor(e.phase, e.goal, cfg);
         break;
       case 'reload':
         reloads++;
@@ -184,7 +186,7 @@ export function reconstructScore(
   for (const e of events) {
     const side = sideOf(e.team);
     if (!side) continue;
-    if (e.eventType === 'shot_made') out[side] += pointsFor(e.phase, cfg);
+    if (e.eventType === 'shot_made') out[side] += pointsFor(e.phase, e.goal, cfg);
   }
   return out;
 }

@@ -6,7 +6,7 @@ the other two.
 
 | File | Contract | Status |
 |---|---|---|
-| `SCHEMA_VERSION` | — | `2` |
+| `SCHEMA_VERSION` | — | `3` |
 | `enums.md` | closed sets, identifiers, units | transcribed from doc 0 |
 | `job.schema.json` | A — job record | v2: season, attempt, error_code, progress/stage, timestamps |
 | `events.schema.json` | B — event record | v2: UUID event_id, nullable track_id, corrected/correction_id |
@@ -14,7 +14,7 @@ the other two.
 | `correction.schema.json` | F — corrections | v2: `scope` (event/track), `target_id` |
 | `result.schema.json` | D — `result.json` metadata | key names now pinned by doc 0 |
 | `seasons/<year>.json` | field, periods, point values | per year, selected by `job.season` |
-| `OPEN_QUESTIONS.md` | — | v2 questions resolved; **one open (#14)** |
+| `OPEN_QUESTIONS.md` | — | all resolved through v3 |
 
 Doc 0 names `events.schema.json`, `job.schema.json` and `enums.md`. The other files are
 transcriptions of contracts that doc 0 states normatively in prose (Contract C, the

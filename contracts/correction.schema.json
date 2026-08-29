@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://frc-video-scouting/contracts/correction.schema.json",
-  "title": "Correction record (Contract F, v2)",
+  "title": "Correction record (Contract F, v3)",
   "description": "Corrections never overwrite model output. A correction is a new row referencing what it changes. Reads apply corrections on top of raw records; deleting a correction undoes it.",
   "type": "object",
   "additionalProperties": true,
   "required": ["schema_version", "correction_id", "scope", "target_id", "action", "created_at"],
   "properties": {
-    "schema_version": { "type": "integer", "const": 2 },
+    "schema_version": { "type": "integer", "const": 3 },
     "correction_id": { "type": "string", "format": "uuid" },
     "scope": {
       "type": "string",

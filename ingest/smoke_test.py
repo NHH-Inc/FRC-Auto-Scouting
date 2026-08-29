@@ -1,4 +1,4 @@
-"""Contract E smoke test, SCHEMA_VERSION 2.
+"""Contract E smoke test, SCHEMA_VERSION 3.
 
 Seeds the golden fixtures straight into the database and drives every endpoint component 3
 calls. No network, no yt-dlp, no analysis binary -- doc 0: "Component 2 tests the pipeline
@@ -93,7 +93,8 @@ def seed_dir(db, base: Path, local_path: str | None):
     for row in jsonl(base / "events.jsonl"):
         db.add(models.Event(**{k: row[k] for k in (
             "event_id", "schema_version", "job_id", "match_id", "team", "track_id",
-            "t_seconds", "phase", "event_type", "confidence", "field_x", "field_y", "source")}))
+            "t_seconds", "phase", "event_type", "confidence", "field_x", "field_y",
+            "goal", "source")}))
     for row in jsonl(base / "tracks.jsonl"):
         db.add(
             models.Track(
@@ -112,6 +113,13 @@ def seed_dir(db, base: Path, local_path: str | None):
     out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(base / "result.json", out / "result.json")
     return job_data
+
+
+def stats_mod_goals():
+    """Legal goals for the fixture's season, read from the config -- never hardcoded."""
+    from ingest import stats as _stats
+
+    return _stats.legal_goals(_stats.season_config(2026)) or set()
 
 
 def main():
@@ -134,7 +142,7 @@ def main():
     job = next(j for j in body["jobs"] if j["job_id"] == main_job["job_id"])
     check("job carries season", job["season"] == 2026)
     check("job carries attempt + timestamps", job["attempt"] >= 1 and job["updated_at"].endswith("Z"))
-    check("schema_version is 2", job["schema_version"] == 2)
+    check("schema_version is 3", job["schema_version"] == 3)
 
     failed_job = next(j for j in body["jobs"] if j["status"] == "failed")
     check("failed job carries an error_code", failed_job["error_code"] == "rate_limited",
@@ -158,6 +166,39 @@ def main():
 
     r = client.get(f"/api/jobs/{main_job['job_id']}/result")
     check("GET /api/jobs/:id/result", r.status_code == 200 and r.json()["box_sample_rate"] == 5.0)
+
+    print("\nGoal field (v3)")
+    evs = client.get(f"/api/matches/{MATCH}/events").json()["events"]
+    shots = [e for e in evs if e["event_type"] in ("shot_attempt", "shot_made")]
+    check("every event carries a goal key", all("goal" in e for e in evs))
+    check("some shots name a goal", any(e["goal"] for e in shots))
+    check("some shots have an unknown goal", any(e["goal"] is None for e in shots))
+    legal = set(stats_mod_goals())
+    check("every goal is legal for the season",
+          all(e["goal"] in legal for e in shots if e["goal"]),
+          str({e["goal"] for e in shots}))
+    check("non-shots never carry a goal",
+          all(e["goal"] is None for e in evs
+              if e["event_type"] not in ("shot_attempt", "shot_made")))
+
+    # Goal names are season-scoped, so validation reads the season config, not a fixed enum.
+    a_shot = shots[0]
+    r = client.patch(f"/api/events/{a_shot['event_id']}", json={"goal": "trench"})
+    check("a goal not in this season's config is rejected", r.status_code == 400,
+          str(r.status_code))
+    r = client.patch(f"/api/events/{a_shot['event_id']}", json={"goal": "low"})
+    check("a legal goal is accepted", r.status_code == 200 and r.json()["goal"] == "low",
+          r.text[:140])
+    raw_shot = next(
+        e for e in client.get(f"/api/matches/{MATCH}/events?raw=true").json()["events"]
+        if e["event_id"] == a_shot["event_id"]
+    )
+    check("correcting a goal leaves raw untouched", raw_shot["goal"] == a_shot["goal"],
+          f"raw says {raw_shot['goal']}, was {a_shot['goal']}")
+
+    a_reload = next(e for e in evs if e["event_type"] == "reload")
+    r = client.patch(f"/api/events/{a_reload['event_id']}", json={"goal": "high"})
+    check("a goal on a non-shot is rejected", r.status_code == 400, str(r.status_code))
 
     print("\nAccuracy")
     r = client.get(f"/api/matches/{MATCH}/accuracy")
@@ -216,7 +257,12 @@ def main():
     print("\nCorrection listing and undo")
     r = client.get(f"/api/matches/{MATCH}/corrections")
     corrections = r.json()["corrections"]
-    check("GET corrections envelope", isinstance(corrections, list) and len(corrections) == 2)
+    # Count is not asserted: earlier checks in this run legitimately add corrections.
+    check("GET corrections envelope",
+          isinstance(corrections, list) and len(corrections) >= 2,
+          str(len(corrections) if isinstance(corrections, list) else corrections))
+    check("every correction carries a scope",
+          all(c["scope"] in ("event", "track") for c in corrections))
     track_corr = next(c for c in corrections if c["scope"] == "track")
     check("track correction carries job_id + target_id",
           track_corr["job_id"] == main_job["job_id"] and track_corr["target_id"] == str(victim["track_id"]))

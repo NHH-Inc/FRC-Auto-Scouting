@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { EVENT_TYPES, type EventType, type Job, type ScoutEvent, type Track } from '../contracts';
+import type { SeasonConfig } from '../season';
 import type { ViewEvent } from '../lib/corrections';
 import { EVENT_LABEL, PHASE_LABEL, SOURCE_LABEL, fmtTime } from '../lib/format';
 
@@ -22,6 +23,7 @@ export interface EventInspectorProps {
   onPatch: (eventId: string, fields: Partial<ScoutEvent>) => Promise<void>;
   onDelete: (eventId: string) => Promise<void>;
   onCreate: (event: Omit<ScoutEvent, 'eventId' | 'corrected' | 'correctionId'>) => Promise<void>;
+  season: SeasonConfig;
   tracks: Track[];
   onPatchTrack: (trackId: number, team: number | null) => Promise<void>;
 }
@@ -40,6 +42,7 @@ export function EventInspector(props: EventInspectorProps) {
     onPatch,
     onDelete,
     onCreate,
+    season,
     tracks,
     onPatchTrack,
   } = props;
@@ -153,6 +156,7 @@ export function EventInspector(props: EventInspectorProps) {
 
       <AddEventRow
         job={job}
+        season={season}
         currentTime={currentTime}
         teams={allTeams}
         busy={busy}
@@ -178,6 +182,7 @@ export function EventInspector(props: EventInspectorProps) {
       {selected && (
         <EditPanel
           e={selected}
+          season={season}
           teams={allTeams}
           busy={busy}
           onPatch={(fields) => run(() => onPatch(selected.eventId, fields))}
@@ -247,6 +252,7 @@ function EventRow({
 
 function EditPanel({
   e,
+  season,
   teams,
   busy,
   onPatch,
@@ -254,6 +260,7 @@ function EditPanel({
   onSeek,
 }: {
   e: ViewEvent;
+  season: SeasonConfig;
   teams: number[];
   busy: boolean;
   onPatch: (fields: Partial<ScoutEvent>) => void;
@@ -306,6 +313,22 @@ function EditPanel({
           </select>
         </label>
 
+        {(e.eventType === 'shot_attempt' || e.eventType === 'shot_made') && (
+          <label>
+            Goal
+            <select
+              disabled={busy}
+              value={e.goal ?? ''}
+              onChange={(ev) => onPatch({ goal: ev.target.value || null })}
+            >
+              <option value="">unknown</option>
+              {season.goals.map((g) => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
         <div className="edit-meta">
           <span>track {e.trackId ?? '--'}</span>
           <span>{PHASE_LABEL[e.phase]}</span>
@@ -338,12 +361,14 @@ function EditPanel({
 
 function AddEventRow({
   job,
+  season,
   currentTime,
   teams,
   busy,
   onCreate,
 }: {
   job: Job;
+  season: SeasonConfig;
   currentTime: number;
   teams: number[];
   busy: boolean;
@@ -351,6 +376,8 @@ function AddEventRow({
 }) {
   const [team, setTeam] = useState<number | ''>(teams[0] ?? '');
   const [type, setType] = useState<EventType>('shot_made');
+  const [goal, setGoal] = useState<string>('');
+  const isShot = type === 'shot_attempt' || type === 'shot_made';
 
   const phaseAt = (t: number) =>
     t < 15 ? ('auto' as const) : t < 130 ? ('teleop' as const) : ('endgame' as const);
@@ -368,6 +395,15 @@ function AddEventRow({
           <option key={t} value={t}>{EVENT_LABEL[t]}</option>
         ))}
       </select>
+      {/* Legal goals come from the season config, never a hardcoded list. */}
+      {isShot && (
+        <select value={goal} onChange={(e) => setGoal(e.target.value)} title="Goal">
+          <option value="">goal?</option>
+          {season.goals.map((g) => (
+            <option key={g} value={g}>{g}</option>
+          ))}
+        </select>
+      )}
       <button
         type="button"
         disabled={busy || team === ''}
@@ -383,6 +419,7 @@ function AddEventRow({
             confidence: 1,
             fieldX: null,
             fieldY: null,
+            goal: isShot && goal ? goal : null,
             source: 'manual',
           })
         }

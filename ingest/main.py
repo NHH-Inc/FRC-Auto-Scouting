@@ -368,6 +368,7 @@ def import_results(db: Session, job, results: dict):
                     confidence=data["confidence"],
                     field_x=data.get("field_x"),
                     field_y=data.get("field_y"),
+                    goal=data.get("goal"),
                     source=data.get("source", "model"),
                 )
             )
@@ -553,7 +554,9 @@ def create_manual_event(event_data: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="match_id is required")
 
     checkable = {k: v for k, v in payload.items() if k not in ("job_id", "match_id")}
-    problems = validate_event_fields(checkable)
+    job = db.query(models.Job).filter(models.Job.match_id == match_id).first()
+    goals = stats.legal_goals(stats.season_config(job.season)) if job else None
+    problems = validate_event_fields(checkable, legal_goals=goals)
     if problems:
         raise HTTPException(status_code=400, detail="; ".join(problems))
 
@@ -597,11 +600,21 @@ def update_event(event_id: str, updates: dict, db: Session = Depends(get_db)):
     if not event and not origin:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    problems = validate_event_fields(updates)
+    match_id = event.match_id if event else (origin.match_id if origin else None)
+    job = (
+        db.query(models.Job).filter(models.Job.match_id == match_id).first()
+        if match_id
+        else None
+    )
+    goals = stats.legal_goals(stats.season_config(job.season)) if job else None
+    # An edit that only sets `goal` has no event_type in the patch, so fall back to the
+    # stored one -- otherwise the shot check silently passes on any event.
+    checkable = dict(updates)
+    if "goal" in checkable and "event_type" not in checkable and event is not None:
+        checkable["event_type"] = event.event_type
+    problems = validate_event_fields(checkable, legal_goals=goals)
     if problems:
         raise HTTPException(status_code=400, detail="; ".join(problems))
-
-    match_id = event.match_id if event else (origin.match_id if origin else None)
     db.add(
         models.Correction(
             scope="event",
