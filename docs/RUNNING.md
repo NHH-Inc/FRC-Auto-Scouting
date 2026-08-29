@@ -17,6 +17,29 @@ Throughout, **REPO** means `C:\Coding Stuff\Robotics\FRC-Auto-Scouting` — the 
 
 ---
 
+## The short version
+
+There is one script. It works from any folder, because it resolves paths relative to itself
+rather than to your shell.
+
+```bash
+# in: REPO
+.\run.ps1 setup     # first time only, safe to re-run
+.\run.ps1 doctor    # what is installed, what is missing, what is misconfigured
+.\run.ps1 web       # the UI on fixture data, no backend
+.\run.ps1 full      # ingest service + UI, wired together
+.\run.ps1 serve     # build the UI and serve everything on one port
+.\run.ps1 check     # every test CI runs
+```
+
+`setup` creates the venv, installs both dependency sets, copies `.env.example`, and deletes the
+stray `web\ingest\` folder if a previous attempt made one. `full` writes `web\.env.local` for
+you — that file is not in the repo, which is why you did not have it.
+
+The rest of this document is what those commands do, for when something goes wrong.
+
+---
+
 ## What exists, and what does not
 
 Be clear on this before you go looking for a command that is not there.
@@ -268,6 +291,36 @@ if it does:
 node fixtures\tools\generate_fixture.mjs --no-video   # data only, fast
 node fixtures\tools\generate_fixture.mjs              # also re-renders the video, needs ffmpeg
 ```
+
+---
+
+## Hosting it
+
+**There is nothing to deploy, and you should not put it on the public internet.**
+
+The web app builds to static files, and the ingest service serves them, so one process on one
+port gives you both:
+
+```bash
+# in: REPO
+.\run.ps1 serve
+```
+
+It prints your LAN addresses. At a competition, run that on one laptop and everyone else opens
+`http://<that-laptop-ip>:8080` on the venue wifi. If they cannot connect, Windows Firewall is
+blocking it — allow `python.exe` on private networks.
+
+Why not a real host: the service needs the database, the downloaded video files, yt-dlp and the
+analysis binary, so it is not a static site. Video egress from a cloud host costs money for
+files nobody outside the team needs. And doc 2 already notes that bulk downloading is against
+YouTube's terms — running that as a public service turns a tolerated local tradeoff into
+something with your name on it.
+
+If you later want scouting numbers visible off the network, the Sheets export already does that
+job: it is a shareable link with the aggregates and no video.
+
+For access from outside the venue, Tailscale or ZeroTier gives the team a private network
+without exposing anything publicly.
 
 ---
 

@@ -14,6 +14,7 @@ import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
@@ -889,3 +890,19 @@ def health():
         "statuses": sorted(JOB_STATUSES),
         "dependencies": video_downloader.dependency_status(),
     }
+
+
+# ---------------------------------------------------------------- serving the web app
+#
+# Hosting answer: there is nothing to deploy. `npm run build` produces static files, and this
+# mounts them so ONE process on ONE port serves both the API and the UI. At a competition you
+# run this on a laptop and everyone else opens http://<that-laptop>:8080 over the venue wifi.
+#
+# Publishing it on the open internet would be a mistake anyway: it needs the database, the
+# downloaded video, yt-dlp and the analysis binary, and doc 2 already notes that bulk
+# downloading is against YouTube's terms. Keep it on your own network.
+#
+# Mounted last, so every /api route above wins. html=True gives SPA fallback.
+_web_dist = Path(__file__).resolve().parent.parent / "web" / "dist"
+if _web_dist.is_dir():
+    app.mount("/", StaticFiles(directory=str(_web_dist), html=True), name="web")

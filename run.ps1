@@ -1,0 +1,300 @@
+<#
+.SYNOPSIS
+    One entry point for setting up, running and testing the project.
+
+.DESCRIPTION
+    Every path is resolved relative to this script, so it does not matter which folder you are
+    standing in when you run it. That is the point: the usual failure is running an ingest
+    command from inside web\, which fails with "Could not open requirements file" and leaves a
+    junk venv behind.
+
+.EXAMPLE
+    .\run.ps1 setup     First-time install. Safe to re-run.
+    .\run.ps1 check     Everything CI runs. Do this before pushing.
+    .\run.ps1 web       Web app on fixture data. No backend needed.
+    .\run.ps1 api       Ingest service only, on :8080.
+    .\run.ps1 full      Ingest + web together, wired to each other.
+    .\run.ps1 serve     Build the UI and serve everything from ONE port. For competitions.
+    .\run.ps1 doctor    What is installed and what is missing.
+#>
+
+[CmdletBinding()]
+param(
+    [Parameter(Position = 0)]
+    [ValidateSet('setup', 'check', 'web', 'api', 'full', 'serve', 'doctor', 'help')]
+    [string]$Command = 'help'
+)
+
+# NOT 'Stop'. In PowerShell 5.1 anything a native exe writes to stderr becomes an ErrorRecord,
+# so a harmless deprecation warning from pytest or uvicorn aborts the whole script even though
+# the process exited 0. Exit codes are checked explicitly instead.
+$ErrorActionPreference = 'Continue'
+
+# Runs a native command, echoes its output including stderr, and returns the exit code.
+function Invoke-Native {
+    param([scriptblock]$Block)
+    & $Block 2>&1 | ForEach-Object {
+        if ($_ -is [System.Management.Automation.ErrorRecord]) { Write-Host $_.ToString() }
+        else { Write-Host $_ }
+    }
+    return $LASTEXITCODE
+}
+
+$Repo = $PSScriptRoot
+$Web = Join-Path $Repo 'web'
+$VenvPy = Join-Path $Repo 'ingest\.venv\Scripts\python.exe'
+
+function Say([string]$text, [string]$colour = 'Cyan') { Write-Host "`n$text" -ForegroundColor $colour }
+function Ok([string]$text) { Write-Host "  ok    $text" -ForegroundColor Green }
+function Warn([string]$text) { Write-Host "  warn  $text" -ForegroundColor Yellow }
+function Bad([string]$text) { Write-Host "  FAIL  $text" -ForegroundColor Red }
+
+function Have([string]$name) { return [bool](Get-Command $name -ErrorAction SilentlyContinue) }
+
+function Require-Venv {
+    if (-not (Test-Path $VenvPy)) {
+        Bad "No Python venv. Run: .\run.ps1 setup"
+        exit 1
+    }
+}
+
+# --------------------------------------------------------------------------- doctor
+
+function Invoke-Doctor {
+    Say 'Tooling'
+    foreach ($t in @(
+        @{ n = 'node';   why = 'web app' },
+        @{ n = 'npm';    why = 'web app' },
+        @{ n = 'python'; why = 'ingest service' },
+        @{ n = 'ffmpeg'; why = 'video download and fixture rendering' },
+        @{ n = 'git';    why = 'obviously' },
+        @{ n = 'cmake';  why = 'building the C++ locally (optional, CI does it)' },
+        @{ n = 'ollama'; why = 'local vision models for labelling (optional)' }
+    )) {
+        if (Have $t.n) { Ok "$($t.n)  -  $($t.why)" } else { Warn "$($t.n) missing  -  needed for: $($t.why)" }
+    }
+
+    Say 'Project'
+    if (Test-Path $VenvPy) { Ok 'Python venv' } else { Warn 'Python venv missing  -  run: .\run.ps1 setup' }
+    if (Test-Path (Join-Path $Web 'node_modules')) { Ok 'npm packages' } else { Warn 'npm packages missing  -  run: .\run.ps1 setup' }
+    if (Test-Path (Join-Path $Repo 'ingest\.env')) { Ok 'ingest\.env' } else { Warn 'ingest\.env missing  -  run: .\run.ps1 setup' }
+    if (Test-Path (Join-Path $Web '.env.local')) { Ok 'web\.env.local' } else { Warn 'web\.env.local missing  -  created by: .\run.ps1 full' }
+
+    # Report which secrets are set, never their values.
+    $envFile = Join-Path $Repo 'ingest\.env'
+    if (Test-Path $envFile) {
+        Say 'Secrets (names only, never values)'
+        foreach ($key in @('TBA_API_KEY', 'SHEETS_SPREADSHEET_ID', 'GOOGLE_APPLICATION_CREDENTIALS')) {
+            $line = Select-String -Path $envFile -Pattern "^\s*$key\s*=\s*(.+)$" -ErrorAction SilentlyContinue
+            if ($line) { Ok "$key is set" } else { Warn "$key is empty  -  see docs\RUNNING.md" }
+        }
+    }
+
+    Say 'Stray files'
+    if (Test-Path (Join-Path $Web 'ingest')) {
+        Bad 'web\ingest\ exists  -  a venv made from the wrong folder. Delete it:'
+        Write-Host '        Remove-Item -Recurse -Force web\ingest' -ForegroundColor Red
+    }
+    else { Ok 'none' }
+}
+
+# --------------------------------------------------------------------------- setup
+
+function Invoke-Setup {
+    Say 'Web packages'
+    Push-Location $Web
+    try { npm install } finally { Pop-Location }
+    Ok 'npm install'
+
+    Say 'Python venv'
+    if (-not (Test-Path $VenvPy)) {
+        Push-Location $Repo
+        try { python -m venv ingest\.venv } finally { Pop-Location }
+    }
+    & $VenvPy -m pip install --quiet --upgrade pip
+    & $VenvPy -m pip install --quiet -r (Join-Path $Repo 'ingest\requirements.txt')
+    & $VenvPy -m pip install --quiet pytest
+    Ok 'ingest dependencies'
+
+    Say 'Config'
+    $envFile = Join-Path $Repo 'ingest\.env'
+    if (-not (Test-Path $envFile)) {
+        Copy-Item (Join-Path $Repo 'ingest\.env.example') $envFile
+        Ok 'created ingest\.env  -  open it and add your TBA key'
+    }
+    else { Ok 'ingest\.env already exists, left alone' }
+
+    if (Test-Path (Join-Path $Web 'ingest')) {
+        Remove-Item -Recurse -Force (Join-Path $Web 'ingest')
+        Ok 'removed stray web\ingest\'
+    }
+
+    Say 'Done. Next:' 'Green'
+    Write-Host '    .\run.ps1 web     just the UI, on fixture data'
+    Write-Host '    .\run.ps1 full    ingest service + UI together'
+    Write-Host '    .\run.ps1 check   run every test'
+}
+
+# --------------------------------------------------------------------------- check
+
+function Invoke-Check {
+    Require-Venv
+    $failed = @()
+
+    Say 'web  -  typecheck'
+    Push-Location $Web
+    try {
+        $code = Invoke-Native { npm run typecheck }
+        if ($code -ne 0) { $failed += 'typecheck' } else { Ok 'typecheck' }
+
+        Say 'web  -  build'
+        $code = Invoke-Native { npm run build }
+        if ($code -ne 0) { $failed += 'build' } else { Ok 'build' }
+
+        Say 'fixtures  -  validate against contracts'
+        $code = Invoke-Native { npm run validate:fixtures }
+        if ($code -ne 0) { $failed += 'validate:fixtures' } else { Ok 'fixtures' }
+    }
+    finally { Pop-Location }
+
+    Push-Location $Repo
+    try {
+        Say 'ingest  -  unit tests'
+        $code = Invoke-Native { & $VenvPy -m pytest ingest\tests -q }
+        if ($code -ne 0) { $failed += 'pytest' } else { Ok 'pytest' }
+
+        Say 'ingest  -  Contract E smoke test'
+        $code = Invoke-Native { & $VenvPy -m ingest.smoke_test }
+        if ($code -ne 0) { $failed += 'smoke_test' } else { Ok 'smoke test' }
+
+        # The generator is deterministic, so regenerating must change nothing. Catches anyone
+        # hand-editing golden data instead of changing the generator.
+        Say 'fixtures  -  reproducible?'
+        Invoke-Native { node fixtures\tools\generate_fixture.mjs --no-video } | Out-Null
+        git diff --quiet -- fixtures
+        if ($LASTEXITCODE -ne 0) {
+            Bad 'regenerating changed the fixtures'
+            git --no-pager diff --stat -- fixtures
+            $failed += 'fixture reproducibility'
+        }
+        else { Ok 'fixtures reproduce byte-for-byte' }
+    }
+    finally { Pop-Location }
+
+    if ($failed.Count -gt 0) {
+        Say "FAILED: $($failed -join ', ')" 'Red'
+        exit 1
+    }
+    Say 'All checks passed.' 'Green'
+}
+
+# --------------------------------------------------------------------------- run
+
+function Invoke-Web {
+    Say 'Web app on fixture data  -  http://localhost:5173' 'Green'
+    Write-Host '  No backend needed. Ctrl+C to stop.'
+    Push-Location $Web
+    try { npm run dev } finally { Pop-Location }
+}
+
+function Invoke-Api {
+    Require-Venv
+    Say 'Ingest service  -  http://localhost:8080' 'Green'
+    Write-Host '  Health: http://localhost:8080/api/health'
+    Write-Host '  Docs:   http://localhost:8080/docs'
+    Push-Location $Repo
+    try { & $VenvPy -m uvicorn ingest.main:app --reload --port 8080 } finally { Pop-Location }
+}
+
+function Invoke-Full {
+    Require-Venv
+
+    # Vite only reads env vars at startup, so a file beats $env: -- it survives closing the shell.
+    $localEnv = Join-Path $Web '.env.local'
+    if (-not (Test-Path $localEnv)) {
+        Set-Content -Path $localEnv -Value 'VITE_API_MODE=http' -Encoding utf8
+        Ok 'created web\.env.local  ->  VITE_API_MODE=http'
+    }
+    elseif (-not (Select-String -Path $localEnv -Pattern 'VITE_API_MODE\s*=\s*http' -Quiet)) {
+        Warn 'web\.env.local exists but does not set VITE_API_MODE=http  -  the UI will use fixtures'
+    }
+
+    Say 'Starting the ingest service in a second window...'
+    $apiCmd = "Set-Location '$Repo'; & '$VenvPy' -m uvicorn ingest.main:app --reload --port 8080"
+    Start-Process powershell -ArgumentList '-NoExit', '-Command', $apiCmd | Out-Null
+    Start-Sleep -Seconds 3
+
+    try {
+        $health = Invoke-RestMethod -Uri 'http://localhost:8080/api/health' -TimeoutSec 5
+        Ok "ingest is up  -  schema_version $($health.schema_version)"
+    }
+    catch {
+        Warn 'ingest did not answer yet; check the other window for errors'
+    }
+
+    Say 'Web app  -  http://localhost:5173' 'Green'
+    Write-Host '  Analysis will report analysis_failed until component 1 has a detection pipeline.'
+    Write-Host '  The download and the player both work; the boxes are what is missing.'
+    Push-Location $Web
+    try { npm run dev } finally { Pop-Location }
+}
+
+
+function Invoke-Serve {
+    Require-Venv
+
+    # Build once, then let the ingest service hand out the static files. One process, one port,
+    # which is what you want on a laptop at a venue -- everyone else just opens your IP.
+    Say 'Building the web app...'
+    Push-Location $Web
+    try {
+        $code = Invoke-Native { npm run build }
+        if ($code -ne 0) { Bad 'build failed'; exit 1 }
+    }
+    finally { Pop-Location }
+    Ok 'built to web\dist'
+
+    $ips = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
+        Select-Object -ExpandProperty IPAddress
+
+    Say 'Serving everything on port 8080' 'Green'
+    Write-Host '  This machine : http://localhost:8080'
+    foreach ($ip in $ips) { Write-Host "  Others       : http://${ip}:8080" }
+    Write-Host ''
+    Write-Host '  Others on the same wifi use one of those addresses. If they cannot reach it,'
+    Write-Host '  Windows Firewall is blocking the port -- allow python.exe on private networks.'
+
+    Push-Location $Repo
+    try { & $VenvPy -m uvicorn ingest.main:app --host 0.0.0.0 --port 8080 } finally { Pop-Location }
+}
+
+# --------------------------------------------------------------------------- dispatch
+
+switch ($Command) {
+    'setup'  { Invoke-Setup }
+    'check'  { Invoke-Check }
+    'web'    { Invoke-Web }
+    'api'    { Invoke-Api }
+    'full'   { Invoke-Full }
+    'serve'  { Invoke-Serve }
+    'doctor' { Invoke-Doctor }
+    default {
+        Write-Host @'
+FRC Video Scouting
+
+  .\run.ps1 setup     First-time install. Safe to re-run.
+  .\run.ps1 doctor    What is installed and what is missing.
+
+  .\run.ps1 web       Web app on fixture data. No backend needed.
+  .\run.ps1 api       Ingest service only, on :8080.
+  .\run.ps1 full      Ingest + web together, wired to each other.
+  .\run.ps1 serve     Build the UI and serve it all on one port. For competitions.
+
+  .\run.ps1 check     Everything CI runs. Do this before pushing.
+
+Run it from anywhere -- paths resolve relative to the script, not your shell.
+Full guide: docs\RUNNING.md
+'@
+    }
+}
