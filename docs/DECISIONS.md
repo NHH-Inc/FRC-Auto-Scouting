@@ -102,10 +102,16 @@ video-to-match resolution could never have matched anything. Fixed to use the fu
 Now confirmed end to end: 324 events for 2024, alliances returned with the `frc` prefix
 stripped to integers, real scores, and `m_uFap-LvzU` resolving to `2024week0_f1m1`.
 
-**D11 — Robert owns the export spreadsheet.** `settled` (Robert)
-Needs a Google Cloud service account, its JSON key, and the sheet shared with that service
-account's email. Until `SHEETS_SPREADSHEET_ID` and `GOOGLE_APPLICATION_CREDENTIALS` are both
-set, the export endpoint returns 503 rather than claiming a write that did not happen.
+**D11 — Export spreadsheet.** `blocked` on one file
+Sheet is `1oF8oumoi1f7wWQGszfF4XcOD8rDUWo08RrkMttRg9bI`, and `SHEETS_SPREADSHEET_ID` is set in
+`ingest/.env`. `google-api-python-client` and `google-auth` are installed.
+
+Still missing: a service account JSON at `GOOGLE_APPLICATION_CREDENTIALS`, and the sheet shared
+with that service account's email as an **Editor**. Link-sharing is not enough — the Sheets API
+authenticates as the service account, so it needs its own grant.
+
+Until then the endpoint returns 503. That is deliberate: doc 3 treats the spreadsheet URL as
+required output, and reporting a write that never happened is worse than refusing.
 
 **D12 — CI compiles component 1; MSVC + vcpkg for local Windows builds.** `default`
 `.github/workflows/ci.yml` builds `analysis/` on every push and runs a Contract D smoke test
