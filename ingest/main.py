@@ -9,9 +9,9 @@ import json
 import os
 import uuid
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from . import database, downloader, models, orchestrator, stats
@@ -26,6 +26,12 @@ from .serializers import (
 )
 
 app = FastAPI(title="FRC Auto-Scouting Ingest Service")
+
+
+@app.exception_handler(HTTPException)
+async def contract_http_error(_request: Request, exc: HTTPException):
+    """Contract E errors are ``{"error": "message"}``, not FastAPI's ``detail`` shape."""
+    return JSONResponse(status_code=exc.status_code, content={"error": str(exc.detail)})
 
 # The web dev server runs on 5173 (doc 0 default). Vite proxies /api in dev, but a build
 # served from anywhere else talks to this directly.
@@ -44,10 +50,34 @@ database.init_db()
 
 get_db = database.get_db
 
-video_downloader = downloader.VideoDownloader(download_dir="./data/segments")
+data_dir = os.environ.get("FRC_DATA_DIR", "./data")
+video_downloader = downloader.VideoDownloader(download_dir=os.path.join(data_dir, "segments"))
 analysis_orchestrator = orchestrator.AnalysisOrchestrator(
-    binary_path=os.environ.get("ANALYSIS_BINARY", "./analysis/build/bin/analysis")
+    binary_path=os.environ.get("ANALYSIS_BINARY", "./analysis/build/bin/analysis"),
+    output_base_dir=os.path.join(data_dir, "jobs"),
 )
+
+
+def _media_window(url: str, info: dict) -> tuple[float, float, bool]:
+    """Resolve the local segment window from metadata and an optional URL timestamp."""
+    total_duration = info.get("duration")
+    if not isinstance(total_duration, (int, float)) or total_duration <= 0:
+        raise ValueError("Could not determine a finite video duration")
+
+    start = info.get("section_start") or info.get("start_time")
+    if not isinstance(start, (int, float)):
+        start = downloader.start_time_from_url(url)
+    start = max(0.0, float(start))
+    if start >= float(total_duration):
+        raise ValueError("The YouTube start time is beyond the end of the video")
+
+    end = info.get("section_end") or info.get("end_time")
+    if not isinstance(end, (int, float)) or end <= start:
+        end = float(total_duration)
+    end = min(float(total_duration), float(end))
+    duration = end - start
+    full_video = start == 0.0 and abs(duration - float(total_duration)) < 0.001
+    return start, duration, full_video
 
 
 # ---------------------------------------------------------------- jobs
@@ -67,10 +97,11 @@ async def create_job(
     try:
         info = video_downloader.get_video_info(url)
         video_id = info.get("id")
+        start_offset, duration, _full_video = _media_window(url, info)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to get video info: {exc}")
 
-    if not video_id:
+    if not isinstance(video_id, str) or len(video_id) != 11:
         raise HTTPException(status_code=400, detail="Could not resolve a YouTube video ID")
 
     job_id = str(uuid.uuid4())
@@ -82,7 +113,8 @@ async def create_job(
         # unresolved job's events.
         match_id=match_id,
         status="queued",
-        duration=info.get("duration"),
+        start_offset=start_offset,
+        duration=duration,
         fps=info.get("fps"),
         width=info.get("width"),
         height=info.get("height"),
@@ -147,9 +179,10 @@ async def retry_job(
     job.stage = None
     db.commit()
     db.refresh(job)
-    background_tasks.add_task(
-        process_job, job_id, f"https://www.youtube.com/watch?v={job.video_id}"
-    )
+    retry_url = f"https://www.youtube.com/watch?v={job.video_id}"
+    if job.start_offset:
+        retry_url += f"&t={job.start_offset}s"
+    background_tasks.add_task(process_job, job_id, retry_url)
     return job_to_dict(job)
 
 
@@ -166,19 +199,38 @@ def process_job(job_id: str, url: str):
         db.commit()
 
     try:
-        set_status("downloading", stage="yt-dlp", progress=None)
+        set_status("downloading", stage="yt-dlp", progress=0.0)
 
         info = video_downloader.get_video_info(url)
-        # TODO: derive the match window from TBA or the description chapter list. Until then
-        # the segment is the whole video, so start_offset stays 0 and remains correct.
-        start_offset = job.start_offset or 0.0
-        duration = info.get("duration") or 150.0
+        start_offset, duration, full_video = _media_window(url, info)
+
+        last_download_progress = -1.0
+
+        def on_download_progress(progress, stage):
+            nonlocal last_download_progress
+            # yt-dlp can emit dozens of hooks per second. Persist useful increments rather
+            # than turning SQLite/Postgres into the bottleneck.
+            should_commit = (
+                progress is None
+                or progress >= 1.0
+                or progress - last_download_progress >= 0.02
+                or job.stage != stage
+            )
+            if not should_commit:
+                return
+            job.progress = progress
+            job.stage = stage
+            if progress is not None:
+                last_download_progress = progress
+            db.commit()
 
         local_path = video_downloader.download_segment(
             video_id=job.video_id,
             start_time=start_offset,
             duration=duration,
             job_id=job_id,
+            full_video=full_video,
+            on_progress=on_download_progress,
         )
 
         # Write the media metadata back to the JOB, not just into the dict handed to the
@@ -186,6 +238,7 @@ def process_job(job_id: str, url: str):
         set_status(
             "downloaded",
             local_path=local_path,
+            start_offset=start_offset,
             duration=duration,
             fps=info.get("fps") or 30.0,
             width=info.get("width") or 1920,
@@ -530,4 +583,9 @@ def get_video(job_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "schema_version": 1, "statuses": sorted(JOB_STATUSES)}
+    return {
+        "status": "ok",
+        "schema_version": 1,
+        "statuses": sorted(JOB_STATUSES),
+        "dependencies": video_downloader.dependency_status(),
+    }

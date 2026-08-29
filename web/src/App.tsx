@@ -59,7 +59,10 @@ export default function App() {
     void getApi().then((api) => setVideoSrc(api.videoUrl(job)));
   }, [job]);
 
-  const match = useMatch(job?.matchId ?? null);
+  // Events and tracks are written only after analysis. The local video itself is available
+  // earlier, so do not issue empty analysis requests while a job is still moving.
+  const analysisComplete = job?.status === 'complete';
+  const match = useMatch(job?.matchId ?? null, analysisComplete);
 
   // A complete job whose media metadata never arrived cannot drive a player -- rather than
   // defaulting a duration and drawing a wrong scrub bar, the stage says so.
@@ -95,7 +98,7 @@ export default function App() {
       <main className="main">
         {!job && <div className="stage-empty">Queue a video, or pick one from the queue.</div>}
 
-        {job && job.status !== 'complete' && (
+        {job && !playable && job.status !== 'complete' && (
           <div className="stage-empty">
             <p>
               <strong>{job.matchId ?? job.videoId}</strong> is {job.status}.
@@ -103,7 +106,7 @@ export default function App() {
             <p className="muted">
               {job.status === 'failed'
                 ? 'Retry from the sidebar — the video ID is stored on the job, so there is nothing to re-paste.'
-                : 'The player opens once analysis finishes.'}
+                : 'The player opens as soon as yt-dlp finishes the local download.'}
             </p>
           </div>
         )}
@@ -123,8 +126,24 @@ export default function App() {
           </div>
         )}
 
-        {job && job.status === 'complete' && playable && videoSrc && (
+        {job && playable && videoSrc && (
           <>
+            {job.status !== 'complete' && (
+              <div className={`media-status ${job.status === 'failed' ? 'failed' : ''}`}>
+                {job.status === 'failed' ? (
+                  <>
+                    Analysis failed, but the downloaded video is still available.{' '}
+                    <span className="muted">{job.error}</span>
+                  </>
+                ) : (
+                  <>
+                    Local video ready. Analysis is {job.status}
+                    {job.stage ? ` · ${job.stage}` : ''}
+                    {job.progress != null ? ` · ${Math.round(job.progress * 100)}%` : ''}.
+                  </>
+                )}
+              </div>
+            )}
             <VideoPlayer
               job={playable}
               src={videoSrc}
@@ -138,27 +157,29 @@ export default function App() {
               onTimeChange={setCurrentTime}
             />
 
-            <nav className="tabs">
-              {TABS.map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={tab === id ? 'on' : ''}
-                  onClick={() => setTab(id)}
-                >
-                  {label}
-                </button>
-              ))}
-              <span className="tabs-meta muted">
-                {match.loading
-                  ? 'loading…'
-                  : `${match.events.length} events · ${match.tracks.length} tracks · boxes @ ${match.boxSampleRate.toFixed(0)} Hz`}
-              </span>
-            </nav>
+            {analysisComplete && (
+              <nav className="tabs">
+                {TABS.map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={tab === id ? 'on' : ''}
+                    onClick={() => setTab(id)}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <span className="tabs-meta muted">
+                  {match.loading
+                    ? 'loading…'
+                    : `${match.events.length} events · ${match.tracks.length} tracks · boxes @ ${match.boxSampleRate.toFixed(0)} Hz`}
+                </span>
+              </nav>
+            )}
 
-            {match.error && <p className="error">{match.error}</p>}
+            {analysisComplete && match.error && <p className="error">{match.error}</p>}
 
-            {tab === 'timeline' && (
+            {analysisComplete && tab === 'timeline' && (
               <Timeline
                 job={playable}
                 events={match.events}
@@ -169,7 +190,7 @@ export default function App() {
                 onSeek={seek}
               />
             )}
-            {tab === 'teams' && (
+            {analysisComplete && tab === 'teams' && (
               <TeamStats
                 job={job}
                 events={match.events}
@@ -177,9 +198,13 @@ export default function App() {
                 onSelectTeam={setSelectedTeam}
               />
             )}
-            {tab === 'heatmap' && <HeatMap events={match.events} selectedTeam={selectedTeam} />}
-            {tab === 'accuracy' && <AccuracyPanel accuracy={match.accuracy} fromRaw />}
-            {tab === 'export' && <ExportPanel matchIds={matchIds} />}
+            {analysisComplete && tab === 'heatmap' && (
+              <HeatMap events={match.events} selectedTeam={selectedTeam} />
+            )}
+            {analysisComplete && tab === 'accuracy' && (
+              <AccuracyPanel accuracy={match.accuracy} fromRaw />
+            )}
+            {analysisComplete && tab === 'export' && <ExportPanel matchIds={matchIds} />}
           </>
         )}
       </main>

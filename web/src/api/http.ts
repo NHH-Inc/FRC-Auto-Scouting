@@ -109,7 +109,7 @@ export class HttpApi implements ScoutingApi {
     // No retry endpoint in Contract E (OPEN_QUESTIONS.md #5). Re-POST from the job record
     // so the user never re-pastes the link. This mints a new job_id.
     return this.createJob({
-      url: `https://www.youtube.com/watch?v=${job.videoId}`,
+      url: `https://www.youtube.com/watch?v=${job.videoId}${job.startOffset > 0 ? `&t=${job.startOffset}s` : ''}`,
       matchId: job.matchId,
     });
   }

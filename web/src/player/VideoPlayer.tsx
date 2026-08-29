@@ -51,17 +51,27 @@ export function VideoPlayer({
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
+  const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(false);
   const [showBoxes, setShowBoxes] = useState(true);
   const [ready, setReady] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
 
   // The overlay redraws from whatever these hold, so the frame callback never re-subscribes.
   const drawState = useRef({ tracks, events, confidenceThreshold, showBoxes, boxSampleRate });
   drawState.current = { tracks, events, confidenceThreshold, showBoxes, boxSampleRate };
 
   const duration = job.duration;
+
+  useEffect(() => {
+    setReady(false);
+    setMediaError(null);
+    setTime(0);
+  }, [src]);
 
   // ---- drawing
 
@@ -240,17 +250,17 @@ export function VideoPlayer({
         togglePlay();
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        step(e.shiftKey ? -30 : -1);
+        step(e.shiftKey ? -job.fps : -1);
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        step(e.shiftKey ? 30 : 1);
+        step(e.shiftKey ? job.fps : 1);
       } else if (e.key === 'b') {
         setShowBoxes((v) => !v);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [togglePlay, step]);
+  }, [togglePlay, step, job.fps]);
 
   // ---- scrub bar markers
 
@@ -268,10 +278,24 @@ export function VideoPlayer({
   );
 
   const selected = events.find((e) => e.eventId === selectedEventId) ?? null;
+  const phasePct = (seconds: number) => Math.min(100, Math.max(0, (seconds / duration) * 100));
+
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await stageRef.current?.requestFullscreen();
+    } catch {
+      setMediaError('This browser did not allow fullscreen playback.');
+    }
+  };
 
   return (
     <section className="player">
-      <div className="player-stage" style={{ aspectRatio: `${job.width} / ${job.height}` }}>
+      <div
+        ref={stageRef}
+        className="player-stage"
+        style={{ aspectRatio: `${job.width} / ${job.height}` }}
+      >
         <video
           ref={videoRef}
           className="player-video"
@@ -280,11 +304,29 @@ export function VideoPlayer({
           playsInline
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
+          onEnded={() => setPlaying(false)}
           onRateChange={(e) => setRate((e.target as HTMLVideoElement).playbackRate)}
-          onLoadedData={() => setReady(true)}
+          onVolumeChange={(e) => {
+            const video = e.target as HTMLVideoElement;
+            setVolume(video.volume);
+            setMuted(video.muted);
+          }}
+          onLoadedData={() => {
+            setReady(true);
+            setMediaError(null);
+          }}
+          onError={(e) => {
+            const video = e.target as HTMLVideoElement;
+            setReady(false);
+            setMediaError(
+              video.error?.message ||
+                'The downloaded file could not be played. Check that it uses a browser-supported MP4 codec.'
+            );
+          }}
         />
         <canvas ref={canvasRef} className="player-overlay" />
-        {!ready && <div className="player-loading">loading segment…</div>}
+        {!ready && !mediaError && <div className="player-loading">loading local video…</div>}
+        {mediaError && <div className="player-loading player-media-error">{mediaError}</div>}
       </div>
 
       <div className="scrub">
@@ -292,22 +334,22 @@ export function VideoPlayer({
           {/* Phase bands, so auto/teleop/endgame are readable at a glance. */}
           <div
             className="scrub-phase auto"
-            style={{ left: 0, width: `${(PHASE_BOUNDS.autoEnd / duration) * 100}%` }}
+            style={{ left: 0, width: `${phasePct(PHASE_BOUNDS.autoEnd)}%` }}
             title="Auto"
           />
           <div
             className="scrub-phase teleop"
             style={{
-              left: `${(PHASE_BOUNDS.autoEnd / duration) * 100}%`,
-              width: `${((PHASE_BOUNDS.teleopEnd - PHASE_BOUNDS.autoEnd) / duration) * 100}%`,
+              left: `${phasePct(PHASE_BOUNDS.autoEnd)}%`,
+              width: `${phasePct(PHASE_BOUNDS.teleopEnd) - phasePct(PHASE_BOUNDS.autoEnd)}%`,
             }}
             title="Teleop"
           />
           <div
             className="scrub-phase endgame"
             style={{
-              left: `${(PHASE_BOUNDS.teleopEnd / duration) * 100}%`,
-              width: `${((PHASE_BOUNDS.matchEnd - PHASE_BOUNDS.teleopEnd) / duration) * 100}%`,
+              left: `${phasePct(PHASE_BOUNDS.teleopEnd)}%`,
+              width: `${phasePct(PHASE_BOUNDS.matchEnd) - phasePct(PHASE_BOUNDS.teleopEnd)}%`,
             }}
             title="Endgame"
           />
@@ -336,13 +378,13 @@ export function VideoPlayer({
       </div>
 
       <div className="transport">
-        <button type="button" onClick={() => step(-30)} title="Back 1s (Shift+Left)">«</button>
+        <button type="button" onClick={() => step(-job.fps)} title="Back 1s (Shift+Left)">«</button>
         <button type="button" onClick={() => step(-1)} title="Previous frame (Left)">‹</button>
         <button type="button" className="primary" onClick={togglePlay} title="Play/pause (Space)">
           {playing ? 'Pause' : 'Play'}
         </button>
         <button type="button" onClick={() => step(1)} title="Next frame (Right)">›</button>
-        <button type="button" onClick={() => step(30)} title="Forward 1s (Shift+Right)">»</button>
+        <button type="button" onClick={() => step(job.fps)} title="Forward 1s (Shift+Right)">»</button>
 
         <span className="transport-time" title="Segment time, and position in the original video">
           <strong>{fmtTime(time)}</strong>
@@ -365,10 +407,46 @@ export function VideoPlayer({
           </select>
         </label>
 
+        <div className="transport-volume">
+          <button
+            type="button"
+            onClick={() => {
+              const video = videoRef.current;
+              if (video) video.muted = !video.muted;
+            }}
+            aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'}
+            title={muted || volume === 0 ? 'Unmute' : 'Mute'}
+          >
+            {muted || volume === 0 ? 'Muted' : 'Sound'}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={muted ? 0 : volume}
+            aria-label="Volume"
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              const video = videoRef.current;
+              if (video) {
+                video.volume = next;
+                video.muted = next === 0;
+              }
+              setVolume(next);
+              setMuted(next === 0);
+            }}
+          />
+        </div>
+
         <label className="transport-toggle" title="Toggle overlay (B)">
           <input type="checkbox" checked={showBoxes} onChange={(e) => setShowBoxes(e.target.checked)} />
           Boxes
         </label>
+
+        <button type="button" onClick={() => void toggleFullscreen()} title="Fullscreen">
+          Fullscreen
+        </button>
 
         {/* The one place component 3 adds start_offset -- doc 0 says nothing else ever should. */}
         <a

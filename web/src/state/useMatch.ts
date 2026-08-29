@@ -45,11 +45,11 @@ const EMPTY: MatchData = {
  * human touched. When component 2 grows a corrections endpoint (OPEN_QUESTIONS.md #3) the
  * diff path here can go away.
  */
-export function useMatch(matchId: string | null) {
+export function useMatch(matchId: string | null, ready = true) {
   const [data, setData] = useState<MatchData>(EMPTY);
 
   const load = useCallback(async () => {
-    if (!matchId) {
+    if (!matchId || !ready) {
       setData({ ...EMPTY, loading: false });
       return;
     }
@@ -93,7 +93,7 @@ export function useMatch(matchId: string | null) {
     } catch (e) {
       setData({ ...EMPTY, loading: false, error: (e as Error).message });
     }
-  }, [matchId]);
+  }, [matchId, ready]);
 
   useEffect(() => {
     void load();

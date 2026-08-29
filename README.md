@@ -35,6 +35,38 @@ shared surface and nothing in `/contracts/` changes without all three people agr
 Serves the whole UI against `/fixtures/`, including a real 152-second match video. Ports are
 doc 0 defaults: web `5173`, ingest `8080`, Postgres `5432`.
 
+## Running the real YouTube-to-local player
+
+Install ffmpeg once (yt-dlp uses it to merge YouTube's separate video and audio streams):
+
+    brew install ffmpeg                 # macOS
+    # sudo apt install ffmpeg           # Debian/Ubuntu
+
+From the repository root, start the ingest API:
+
+    python3 -m venv .venv
+    .venv/bin/pip install -r ingest/requirements.txt
+    .venv/bin/uvicorn ingest.main:app --reload --port 8080
+
+In a second terminal, start the web app in HTTP mode:
+
+    cd web
+    npm install
+    VITE_API_MODE=http npm run dev
+
+Open `http://localhost:5173`, paste a YouTube link, and queue it. yt-dlp stores the local MP4
+under `data/segments/`; the player appears as soon as that file is ready and remains usable
+while analysis runs or if the analysis binary is not built yet. Timestamped links such as
+`&t=2m10s` download only the remaining section and preserve `start_offset`.
+
+Optional authenticated videos can use a browser cookie source:
+
+    YTDLP_COOKIES_FROM_BROWSER=chrome .venv/bin/uvicorn ingest.main:app --port 8080
+
+Run the focused ingest tests with:
+
+    .venv/bin/python -m unittest discover -s ingest/tests -v
+
 ## Checking a component against the contracts
 
     cd web && npm run validate:fixtures

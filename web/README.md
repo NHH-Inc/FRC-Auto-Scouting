@@ -50,6 +50,10 @@ gives the exact `mediaTime` of each presented frame, which is what makes frame-a
 review possible; there is an rAF fallback for browsers without it (Firefox), and it is
 visibly looser.
 
+The local player mounts as soon as yt-dlp has written `local_path`; it does not wait for the
+analysis process to finish. It includes frame and one-second stepping, speed, volume/mute,
+fullscreen, local seeking through HTTP byte ranges, and a readable codec/load error state.
+
 Boxes are interpolated between track samples — the fixture samples at 5 Hz against 30 fps
 video, so five frames in six are interpolated. Interpolation **stops** across gaps longer
 than three sample periods, because doc 1 has the backend skip broadcast shot changes and

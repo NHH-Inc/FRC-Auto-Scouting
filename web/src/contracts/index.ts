@@ -156,6 +156,8 @@ export interface PlayableJob extends Job {
 export function isPlayable(job: Job | null): job is PlayableJob {
   return (
     job != null &&
+    typeof job.localPath === 'string' &&
+    job.localPath.length > 0 &&
     job.duration != null &&
     job.fps != null &&
     job.width != null &&

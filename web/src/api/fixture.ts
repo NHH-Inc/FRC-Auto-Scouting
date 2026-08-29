@@ -231,7 +231,7 @@ export class FixtureApi implements ScoutingApi {
 
   async retryJob(job: Job): Promise<Parsed<Job>> {
     return this.createJob({
-      url: `https://www.youtube.com/watch?v=${job.videoId}`,
+      url: `https://www.youtube.com/watch?v=${job.videoId}${job.startOffset > 0 ? `&t=${job.startOffset}s` : ''}`,
       matchId: job.matchId,
     });
   }
