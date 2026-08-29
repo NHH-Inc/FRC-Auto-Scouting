@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
@@ -67,6 +68,8 @@ class VideoDownloader:
     def __init__(self, download_dir: str = "/data/segments"):
         self.download_dir = Path(download_dir)
         self.download_dir.mkdir(parents=True, exist_ok=True)
+        self._stream_cache: dict[str, tuple[float, dict]] = {}
+        self._stream_lock = threading.Lock()
 
     @property
     def has_ffmpeg(self) -> bool:
@@ -99,6 +102,94 @@ class VideoDownloader:
                 return ydl.extract_info(url, download=False)
         except DownloadError as exc:
             raise RuntimeError(f"yt-dlp could not read that video: {exc}") from exc
+
+    def resolve_stream(self, video_id: str) -> dict:
+        """Resolve browser-playable video and audio URLs without YouTube's web player.
+
+        Signed media URLs expire, so cache them briefly. The ingest API proxies the URL and
+        forwards byte ranges; the browser never loads an iframe, ads, or YouTube controls.
+        """
+        if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+            raise ValueError("Invalid YouTube video ID")
+
+        now = time.monotonic()
+        cached = self._stream_cache.get(video_id)
+        if cached and cached[0] > now:
+            return cached[1]
+
+        # YouTube commonly exposes browser-compatible video and audio as separate DASH files.
+        # Resolve both and let the review player keep two native media elements synchronized.
+        # The fallback `b` handles older uploads that still have one combined file.
+        options: dict = {
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "skip_download": True,
+            "format": (
+                "bv[ext=mp4][vcodec^=avc1][height<=720]+ba[ext=m4a]/"
+                "bv[ext=mp4][height<=720]+ba[ext=m4a]/"
+                "bv[height<=720]+ba/b[height<=720]/best"
+            ),
+        }
+        cookies = os.environ.get("YTDLP_COOKIES_FROM_BROWSER")
+        if cookies:
+            options["cookiesfrombrowser"] = (cookies,)
+
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        try:
+            with self._stream_lock:
+                cached = self._stream_cache.get(video_id)
+                if cached and cached[0] > time.monotonic():
+                    return cached[1]
+                with yt_dlp.YoutubeDL(options) as ydl:
+                    info = ydl.extract_info(url, download=False)
+        except DownloadError as exc:
+            raise RuntimeError(f"yt-dlp stream resolution failed: {exc}") from exc
+
+        formats = info.get("requested_formats") or [info]
+
+        def descriptor(format_info: dict, kind: str) -> dict:
+            media_url = format_info.get("url")
+            protocol = str(format_info.get("protocol") or "")
+            if not isinstance(media_url, str) or not media_url.startswith(("https://", "http://")):
+                raise RuntimeError(f"yt-dlp did not return a directly streamable {kind} URL")
+            if protocol and not protocol.startswith("http"):
+                raise RuntimeError(f"yt-dlp selected unsupported {kind} protocol {protocol}")
+            extension = str(format_info.get("ext") or "").lower()
+            if extension == "webm":
+                content_type = f"{kind}/webm"
+            else:
+                # m4a is an MP4 container, and yt-dlp often omits ext in test/custom extractors.
+                content_type = f"{kind}/mp4"
+            return {
+                "url": media_url,
+                "headers": dict(format_info.get("http_headers") or info.get("http_headers") or {}),
+                "content_type": content_type,
+                "format_id": format_info.get("format_id"),
+            }
+
+        video_format = next(
+            (item for item in formats if item.get("vcodec") not in (None, "none")), None
+        )
+        audio_format = next(
+            (
+                item for item in formats
+                if item.get("acodec") not in (None, "none")
+                and item.get("vcodec") in (None, "none")
+            ),
+            None,
+        )
+        if video_format is None:
+            raise RuntimeError("yt-dlp did not select a video stream")
+
+        resolved = {
+            "video": descriptor(video_format, "video"),
+            # For a combined legacy format, let the hidden audio element decode the same file.
+            # The visible video element is muted whenever an audio source exists.
+            "audio": descriptor(audio_format or video_format, "audio"),
+        }
+        self._stream_cache[video_id] = (time.monotonic() + 15 * 60, resolved)
+        return resolved
 
     def download_segment(
         self,

@@ -114,6 +114,18 @@ The downloader owned by `ingest/` writes MP4 files to `data/segments/`. The `ext
 one of those MP4 files and creates a collection. The `auto-label` command reads the collection images
 and writes only proposal/comparison files back into that same collection directory.
 
+## Which media models should use
+
+Use the immutable downloaded MP4 in `data/segments/` for frame extraction, training, evaluation,
+and repeatable offline inference. Do not build a dataset from `/api/stream/<job-id>/video` or
+`/audio`: those endpoints proxy expiring YouTube URLs and exist only to make review available while
+the local segment downloads. The stream and downloaded segment also use different media clocks.
+
+Model outputs use segment-relative seconds and normalized top-left `x, y, w, h` boxes. A model
+reading a full-source stream must subtract the job's `start_offset` before writing timestamps; a
+model reading the downloaded segment writes its media time directly. See `media-streaming.md` for
+the complete model-facing media, timing, and overlay contract.
+
 ## Where the output is used
 
 The current implementation ends at assisted annotation proposals. It deliberately does not feed

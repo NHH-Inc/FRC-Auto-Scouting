@@ -10,10 +10,13 @@ import os
 import uuid
 from pathlib import Path
 
+import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from . import database, downloader, models, orchestrator, sheets, stats, tba
 from .corrections import apply_corrections, apply_track_corrections
@@ -802,6 +805,77 @@ def get_video(job_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Video file not found")
     # FileResponse answers HTTP range requests, which <video> needs in order to seek.
     return FileResponse(job.local_path, media_type="video/mp4")
+
+
+@app.get("/api/stream/{job_id}/{kind}")
+async def stream_video(
+    job_id: str, kind: str, request: Request, db: Session = Depends(get_db)
+):
+    """Proxy a byte-range video or audio stream resolved by yt-dlp.
+
+    The browser still receives normal byte-range media, so its native <video> element can seek
+    and requestVideoFrameCallback can keep the detection canvas aligned. Current YouTube media
+    is usually split into DASH video and audio files; the web player synchronizes the two local
+    proxy endpoints. No YouTube iframe or ad player is involved.
+    """
+    if kind not in {"video", "audio"}:
+        raise HTTPException(status_code=404, detail="Stream kind must be video or audio")
+    job = db.query(models.Job).filter(models.Job.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    try:
+        streams = await run_in_threadpool(video_downloader.resolve_stream, job.video_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not resolve yt-dlp stream: {exc}")
+
+    resolved = streams.get(kind)
+    if not resolved:
+        raise HTTPException(
+            status_code=404,
+            detail=f"This yt-dlp format has no separate {kind} stream",
+        )
+
+    upstream_headers = dict(resolved.get("headers") or {})
+    if request.headers.get("range"):
+        upstream_headers["Range"] = request.headers["range"]
+
+    client = httpx.AsyncClient(follow_redirects=True, timeout=None)
+    try:
+        upstream_request = client.build_request(
+            "GET", resolved["url"], headers=upstream_headers
+        )
+        upstream = await client.send(upstream_request, stream=True)
+    except Exception as exc:
+        await client.aclose()
+        raise HTTPException(status_code=502, detail=f"yt-dlp media stream failed: {exc}")
+
+    if upstream.status_code >= 400 and upstream.status_code != 416:
+        await upstream.aclose()
+        await client.aclose()
+        raise HTTPException(
+            status_code=502,
+            detail=f"yt-dlp media host returned HTTP {upstream.status_code}",
+        )
+
+    response_headers = {}
+    for header in (
+        "accept-ranges", "content-length", "content-range", "etag", "last-modified"
+    ):
+        if header in upstream.headers:
+            response_headers[header] = upstream.headers[header]
+
+    async def close_upstream():
+        await upstream.aclose()
+        await client.aclose()
+
+    return StreamingResponse(
+        upstream.aiter_raw(),
+        status_code=upstream.status_code,
+        media_type=upstream.headers.get("content-type", resolved.get("content_type", "video/mp4")),
+        headers=response_headers,
+        background=BackgroundTask(close_upstream),
+    )
 
 
 @app.get("/api/health")

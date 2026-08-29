@@ -27,12 +27,13 @@ shared surface and nothing in `/contracts/` changes without all three people agr
 3. `contracts/OPEN_QUESTIONS.md` — all thirteen v1 questions are resolved in
    SCHEMA_VERSION 2; this is where the next one gets raised
 4. `fixtures/README.md` — the one worked example every component builds against
+5. `docs/media-streaming.md` — ad-free preview behavior and the media/time contract for models
 
 ## Running component 3 with no backend
 
     cd web && npm install && npm run dev
 
-Serves the whole UI against `/fixtures/`, including a real 152-second match video. Ports are
+Serves the whole UI against `/fixtures/`, including a generated 152-second test clip. Ports are
 doc 0 defaults: web `5173`, ingest `8080`, Postgres `5432`.
 
 ## Running the real YouTube-to-local player
@@ -54,10 +55,25 @@ In a second terminal, start the web app in HTTP mode:
     npm install
     VITE_API_MODE=http npm run dev
 
-Open `http://localhost:5173`, paste a YouTube link, and queue it. yt-dlp stores the local MP4
-under `data/segments/`; the player appears as soon as that file is ready and remains usable
-while analysis runs or if the analysis binary is not built yet. Timestamped links such as
+Open `http://localhost:5173`, paste a YouTube link, and queue it. An ad-free native preview starts
+after metadata resolves while yt-dlp stores the local MP4 under `data/segments/`. The player remains
+usable while analysis runs or if the analysis binary is not built yet. Timestamped links such as
 `&t=2m10s` download only the remaining section and preserve `start_offset`.
+
+The player toolbar can also switch from **Downloaded file** to **Choose matching video…** to review an
+MP4/MOV/WebM already on this computer. Choose **Clipped match segment** when that file starts at
+segment time zero, or **Full original recording** to apply the job's `start_offset`. The file stays
+in the browser; it is not uploaded. Overlay boxes still come from the selected job's
+`tracks.jsonl`, so the recording must be the exact source analyzed for that job. Choosing an
+unrelated video does not generate new detections.
+
+In HTTP mode, newly queued links open in **yt-dlp stream** mode immediately. The ingest service
+resolves separate browser-compatible video and audio files with local `yt-dlp`, proxies their byte
+ranges through `/api/stream/<job-id>/video` and `/audio`, and keeps the two native media elements
+synchronized. This path uses no YouTube iframe, controls, or ad player. The background download
+continues normally; switch to **Downloaded file** after it finishes for an immutable local copy.
+See `docs/media-streaming.md` for endpoint behavior, time/box coordinate invariants, and the rules
+future model integrations must follow.
 
 Optional authenticated videos can use a browser cookie source:
 

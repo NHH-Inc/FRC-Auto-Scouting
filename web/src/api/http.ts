@@ -263,4 +263,12 @@ export class HttpApi implements ScoutingApi {
   videoUrl(job: Job): string {
     return `${this.base}/video/${encodeURIComponent(job.jobId)}`;
   }
+
+  streamVideoUrl(job: Job): string {
+    return `${this.base}/stream/${encodeURIComponent(job.jobId)}/video`;
+  }
+
+  streamAudioUrl(job: Job): string {
+    return `${this.base}/stream/${encodeURIComponent(job.jobId)}/audio`;
+  }
 }

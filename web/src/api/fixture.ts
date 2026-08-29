@@ -24,6 +24,7 @@ import {
   type WireTrack,
 } from '../contracts';
 import { applyCorrections, applyTrackCorrections } from '../lib/corrections';
+import { parseVideoStartTime } from '../lib/format';
 import { computeTeamStats, reconstructScore } from '../lib/stats';
 import { seasonConfig, type SeasonConfig } from '../season';
 import {
@@ -199,6 +200,7 @@ export class FixtureApi implements ScoutingApi {
       matchId: input.matchId ?? null,
       season: input.season ?? template.season,
       videoId: extractId(input.url) ?? template.videoId,
+      startOffset: parseVideoStartTime(input.url),
       status: 'queued',
       stage: null,
       progress: null,
@@ -484,6 +486,14 @@ export class FixtureApi implements ScoutingApi {
   videoUrl(_job: Job): string {
     // Only the main fixture ships a real segment.
     return `/${MAIN_FIXTURE}/segment.mp4`;
+  }
+
+  streamVideoUrl(job: Job): string {
+    return this.videoUrl(job);
+  }
+
+  streamAudioUrl(job: Job): string {
+    return this.videoUrl(job);
   }
 }
 

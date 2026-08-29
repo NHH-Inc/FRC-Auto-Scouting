@@ -128,6 +128,30 @@ export function parseVideoId(input: string): string | null {
   return null;
 }
 
+/** Extract a YouTube URL's optional t/start/time_continue value as seconds. */
+export function parseVideoStartTime(input: string): number {
+  let parsed: URL;
+  try {
+    parsed = new URL(input.trim());
+  } catch {
+    return 0;
+  }
+  const params = [parsed.searchParams, new URLSearchParams(parsed.hash.replace(/^#/, ''))];
+  for (const values of params) {
+    for (const key of ['t', 'start', 'time_continue']) {
+      const raw = values.get(key)?.trim().toLowerCase();
+      if (!raw) continue;
+      const numeric = Number(raw);
+      if (Number.isFinite(numeric)) return Math.max(0, numeric);
+      const match = raw.match(/^(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?$/);
+      if (match && (match[1] || match[2] || match[3])) {
+        return Number(match[1] ?? 0) * 3600 + Number(match[2] ?? 0) * 60 + Number(match[3] ?? 0);
+      }
+    }
+  }
+  return 0;
+}
+
 /** TBA match keys are lowercase, e.g. 2026casf_qm42. */
 export function isMatchKey(s: string): boolean {
   return /^[0-9]{4}[a-z0-9]+_[a-z0-9]+$/.test(s.trim());

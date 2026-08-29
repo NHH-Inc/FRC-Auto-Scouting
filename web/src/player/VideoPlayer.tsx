@@ -26,6 +26,10 @@ export interface VideoPlayerProps {
   job: PlayableJob;
   season: SeasonConfig;
   src: string;
+  /** Optional separate DASH audio track for an ad-free yt-dlp stream. */
+  audioSrc?: string;
+  /** Source-media timestamp corresponding to t=0 in the analyzed segment. */
+  mediaStartSeconds?: number;
   tracks: Track[];
   events: ViewEvent[];
   /** Events below this are drawn as suspect. Doc 3: low confidence must be visually distinct. */
@@ -42,6 +46,8 @@ export function VideoPlayer({
   job,
   season,
   src,
+  audioSrc,
+  mediaStartSeconds = 0,
   tracks,
   events,
   confidenceThreshold,
@@ -52,6 +58,7 @@ export function VideoPlayer({
   onTimeChange,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [time, setTime] = useState(0);
@@ -62,6 +69,7 @@ export function VideoPlayer({
   const [showBoxes, setShowBoxes] = useState(true);
   const [ready, setReady] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  const [sourceSize, setSourceSize] = useState<{ width: number; height: number } | null>(null);
 
   // The overlay redraws from whatever these hold, so the frame callback never re-subscribes.
   const drawState = useRef({ tracks, events, confidenceThreshold, showBoxes, boxSampleRate });
@@ -74,14 +82,24 @@ export function VideoPlayer({
     setReady(false);
     setMediaError(null);
     setTime(0);
-  }, [src]);
+    setSourceSize(null);
+  }, [src, audioSrc]);
+
+  const segmentTime = useCallback(
+    (mediaTime: number) => mediaTime - mediaStartSeconds,
+    [mediaStartSeconds]
+  );
+
+  const boundedSegmentTime = useCallback(
+    (mediaTime: number) => Math.max(0, Math.min(duration, segmentTime(mediaTime))),
+    [duration, segmentTime]
+  );
 
   // ---- drawing
 
   const draw = useCallback((t: number) => {
     const canvas = canvasRef.current;
-    const video = videoRef.current;
-    if (!canvas || !video) return;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -166,8 +184,14 @@ export function VideoPlayer({
     if (typeof rvfc === 'function') {
       const onFrame = (_now: number, meta: FrameMeta) => {
         if (cancelled) return;
-        setTime(meta.mediaTime);
-        draw(meta.mediaTime);
+        const t = segmentTime(meta.mediaTime);
+        setTime(Math.max(0, Math.min(duration, t)));
+        draw(t);
+        const audio = audioRef.current;
+        if (audio && !video.paused && Math.abs(audio.currentTime - meta.mediaTime) > 0.12) {
+          audio.currentTime = meta.mediaTime;
+        }
+        if (t >= duration && !video.paused) video.pause();
         handle = rvfc.call(video, onFrame);
       };
       handle = rvfc.call(video, onFrame);
@@ -179,8 +203,14 @@ export function VideoPlayer({
 
     const tick = () => {
       if (cancelled) return;
-      setTime(video.currentTime);
-      draw(video.currentTime);
+      const t = segmentTime(video.currentTime);
+      setTime(Math.max(0, Math.min(duration, t)));
+      draw(t);
+      const audio = audioRef.current;
+      if (audio && !video.paused && Math.abs(audio.currentTime - video.currentTime) > 0.12) {
+        audio.currentTime = video.currentTime;
+      }
+      if (t >= duration && !video.paused) video.pause();
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -188,12 +218,12 @@ export function VideoPlayer({
       cancelled = true;
       cancelAnimationFrame(raf);
     };
-  }, [draw, ready]);
+  }, [draw, ready, duration, segmentTime]);
 
   // Paused frames still need redrawing when the caller changes filters or the box toggle.
   useEffect(() => {
-    if (!playing) draw(videoRef.current?.currentTime ?? 0);
-  }, [draw, playing, tracks, events, confidenceThreshold, showBoxes]);
+    if (!playing) draw(time);
+  }, [draw, playing, tracks, events, confidenceThreshold, showBoxes, time]);
 
   // draw() bails when the canvas has no layout yet, and on first load the track data can
   // arrive before that happens -- leaving the overlay blank until the user hits play or
@@ -201,10 +231,10 @@ export function VideoPlayer({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => draw(videoRef.current?.currentTime ?? 0));
+    const ro = new ResizeObserver(() => draw(time));
     ro.observe(canvas);
     return () => ro.disconnect();
-  }, [draw]);
+  }, [draw, time]);
 
   useEffect(() => {
     onTimeChange?.(time);
@@ -216,10 +246,29 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
     const clamped = Math.max(0, Math.min(duration, t));
-    video.currentTime = clamped;
+    video.currentTime = clamped + mediaStartSeconds;
+    if (audioRef.current) audioRef.current.currentTime = clamped + mediaStartSeconds;
     setTime(clamped);
     draw(clamped);
-  }, [duration, draw]);
+  }, [duration, draw, mediaStartSeconds]);
+
+  // Changing between a clipped segment and a full recording does not change the file URL,
+  // so metadata will not fire again. Re-anchor playback explicitly when the mode changes.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !ready) return;
+    if (Number.isFinite(video.duration) && mediaStartSeconds >= video.duration) {
+      setMediaError(
+        `The match offset (${mediaStartSeconds}s) is past the end of this ${fmtClock(video.duration)} video.`
+      );
+      return;
+    }
+    setMediaError(null);
+    video.currentTime = mediaStartSeconds;
+    if (audioRef.current) audioRef.current.currentTime = mediaStartSeconds;
+    setTime(0);
+    draw(0);
+  }, [draw, mediaStartSeconds, ready]);
 
   useEffect(() => {
     if (seekTo) seek(seekTo.t);
@@ -229,18 +278,32 @@ export function VideoPlayer({
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) void video.play();
-    else video.pause();
-  }, []);
+    if (video.paused) {
+      if (time >= duration) seek(0);
+      void video.play();
+      const audio = audioRef.current;
+      if (audio) {
+        audio.currentTime = video.currentTime;
+        void audio.play().catch(() => {
+          setMediaError('The yt-dlp audio stream could not start. Try Play again.');
+        });
+      }
+    }
+    else {
+      video.pause();
+      audioRef.current?.pause();
+    }
+  }, [duration, seek, time]);
 
   const step = useCallback(
     (frames: number) => {
       const video = videoRef.current;
       if (!video) return;
       video.pause();
-      seek(video.currentTime + frames / job.fps);
+      audioRef.current?.pause();
+      seek(time + frames / job.fps);
     },
-    [job.fps, seek]
+    [job.fps, seek, time]
   );
 
   // Keyboard transport, the way anyone reviewing footage expects it.
@@ -297,7 +360,11 @@ export function VideoPlayer({
       <div
         ref={stageRef}
         className="player-stage"
-        style={{ aspectRatio: `${job.width} / ${job.height}` }}
+        style={{
+          aspectRatio: sourceSize
+            ? `${sourceSize.width} / ${sourceSize.height}`
+            : `${job.width} / ${job.height}`,
+        }}
       >
         <video
           ref={videoRef}
@@ -305,14 +372,50 @@ export function VideoPlayer({
           src={src}
           preload="auto"
           playsInline
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          onEnded={() => setPlaying(false)}
-          onRateChange={(e) => setRate((e.target as HTMLVideoElement).playbackRate)}
+          onPlay={() => {
+            setPlaying(true);
+            const audio = audioRef.current;
+            if (audio && audio.paused) {
+              audio.currentTime = videoRef.current?.currentTime ?? mediaStartSeconds;
+              void audio.play().catch(() => undefined);
+            }
+          }}
+          onPause={() => {
+            setPlaying(false);
+            audioRef.current?.pause();
+          }}
+          onEnded={() => {
+            setPlaying(false);
+            audioRef.current?.pause();
+          }}
+          onRateChange={(e) => {
+            const nextRate = (e.target as HTMLVideoElement).playbackRate;
+            setRate(nextRate);
+            if (audioRef.current) audioRef.current.playbackRate = nextRate;
+          }}
           onVolumeChange={(e) => {
+            if (audioSrc) return;
             const video = e.target as HTMLVideoElement;
             setVolume(video.volume);
             setMuted(video.muted);
+          }}
+          onLoadedMetadata={(e) => {
+            const video = e.target as HTMLVideoElement;
+            // Stream audio is played by the synchronized hidden audio element. This also avoids
+            // double audio when yt-dlp falls back to one legacy file containing both tracks.
+            if (audioSrc) video.muted = true;
+            if (video.videoWidth > 0 && video.videoHeight > 0) {
+              setSourceSize({ width: video.videoWidth, height: video.videoHeight });
+            }
+            if (Number.isFinite(video.duration) && mediaStartSeconds >= video.duration) {
+              setMediaError(
+                `The match offset (${mediaStartSeconds}s) is past the end of this ${fmtClock(video.duration)} video.`
+              );
+              return;
+            }
+            video.currentTime = mediaStartSeconds;
+            setTime(boundedSegmentTime(video.currentTime));
+            draw(0);
           }}
           onLoadedData={() => {
             setReady(true);
@@ -327,8 +430,28 @@ export function VideoPlayer({
             );
           }}
         />
+        {audioSrc && (
+          <audio
+            ref={audioRef}
+            src={audioSrc}
+            preload="auto"
+            onLoadedMetadata={(e) => {
+              const audio = e.target as HTMLAudioElement;
+              audio.currentTime = videoRef.current?.currentTime ?? mediaStartSeconds;
+              audio.playbackRate = rate;
+            }}
+            onVolumeChange={(e) => {
+              const audio = e.target as HTMLAudioElement;
+              setVolume(audio.volume);
+              setMuted(audio.muted);
+            }}
+            onError={() => {
+              setMediaError('The yt-dlp audio stream could not be loaded.');
+            }}
+          />
+        )}
         <canvas ref={canvasRef} className="player-overlay" />
-        {!ready && !mediaError && <div className="player-loading">loading local video…</div>}
+        {!ready && !mediaError && <div className="player-loading">loading video…</div>}
         {mediaError && <div className="player-loading player-media-error">{mediaError}</div>}
       </div>
 
@@ -401,6 +524,7 @@ export function VideoPlayer({
             onChange={(e) => {
               const v = Number(e.target.value);
               if (videoRef.current) videoRef.current.playbackRate = v;
+              if (audioRef.current) audioRef.current.playbackRate = v;
               setRate(v);
             }}
           >
@@ -414,8 +538,8 @@ export function VideoPlayer({
           <button
             type="button"
             onClick={() => {
-              const video = videoRef.current;
-              if (video) video.muted = !video.muted;
+              const media = audioRef.current ?? videoRef.current;
+              if (media) media.muted = !media.muted;
             }}
             aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'}
             title={muted || volume === 0 ? 'Unmute' : 'Mute'}
@@ -431,10 +555,10 @@ export function VideoPlayer({
             aria-label="Volume"
             onChange={(e) => {
               const next = Number(e.target.value);
-              const video = videoRef.current;
-              if (video) {
-                video.volume = next;
-                video.muted = next === 0;
+              const media = audioRef.current ?? videoRef.current;
+              if (media) {
+                media.volume = next;
+                media.muted = next === 0;
               }
               setVolume(next);
               setMuted(next === 0);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { getApi } from './api';
 import { isPlayable } from './contracts';
 import { seasonConfig } from './season';
@@ -14,6 +14,13 @@ import { TeamStats } from './views/TeamStats';
 import { Timeline } from './views/Timeline';
 
 type Tab = 'timeline' | 'teams' | 'heatmap' | 'accuracy' | 'export';
+type VideoAlignment = 'segment' | 'original';
+type VideoSource = 'job' | 'stream' | 'local';
+
+interface LocalVideo {
+  name: string;
+  url: string;
+}
 
 const TABS: Array<[Tab, string]> = [
   ['timeline', 'Timeline'],
@@ -35,7 +42,12 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [seekTo, setSeekTo] = useState<{ t: number; nonce: number } | null>(null);
   const [apiMode, setApiMode] = useState<'http' | 'fixture'>('fixture');
-  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const [jobVideoSrc, setJobVideoSrc] = useState<string | null>(null);
+  const [streamVideoSrc, setStreamVideoSrc] = useState<string | null>(null);
+  const [streamAudioSrc, setStreamAudioSrc] = useState<string | null>(null);
+  const [localVideo, setLocalVideo] = useState<LocalVideo | null>(null);
+  const [videoAlignment, setVideoAlignment] = useState<VideoAlignment>('segment');
+  const [videoSource, setVideoSource] = useState<VideoSource>('job');
 
   useEffect(() => {
     void getApi().then((api) => setApiMode(api.mode));
@@ -54,11 +66,48 @@ export default function App() {
 
   useEffect(() => {
     if (!job) {
-      setVideoSrc(null);
+      setJobVideoSrc(null);
+      setStreamVideoSrc(null);
+      setStreamAudioSrc(null);
       return;
     }
-    void getApi().then((api) => setVideoSrc(api.videoUrl(job)));
+    void getApi().then((api) => {
+      setJobVideoSrc(api.videoUrl(job));
+      setStreamVideoSrc(api.streamVideoUrl(job));
+      setStreamAudioSrc(api.streamAudioUrl(job));
+    });
   }, [job]);
+
+  // A browser object URL keeps a selected match recording entirely on this computer.
+  // Revoke it when it is replaced so repeated review sessions do not leak memory.
+  useEffect(() => {
+    return () => {
+      if (localVideo) URL.revokeObjectURL(localVideo.url);
+    };
+  }, [localVideo]);
+
+  // A local recording selected for one job must never silently carry over to another.
+  useEffect(() => {
+    setLocalVideo(null);
+    setVideoAlignment('segment');
+    setVideoSource((source) => source === 'local' ? 'job' : source);
+  }, [job?.jobId]);
+
+  // A queued HTTP job has metadata before its merged MP4 exists. Start on the yt-dlp DASH
+  // proxy so the supplied link is watchable immediately; keep that choice after download.
+  useEffect(() => {
+    if (apiMode === 'http' && job && !job.localPath) setVideoSource('stream');
+  }, [apiMode, job?.jobId, job?.localPath]);
+
+  const chooseLocalVideo = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setLocalVideo({ name: file.name, url: URL.createObjectURL(file) });
+    setVideoAlignment('segment');
+    setVideoSource('local');
+    // Allow selecting the same file again after switching back to the job video.
+    event.target.value = '';
+  };
 
   // Events and tracks are written only after analysis. The local video itself is available
   // earlier, so do not issue empty analysis requests while a job is still moving.
@@ -95,7 +144,13 @@ export default function App() {
           setSelectedJobId(id);
           setSelectedEventId(null);
         }}
-        onCreate={jobsState.createJob}
+        onCreate={async (input) => {
+          const created = await jobsState.createJob(input);
+          setSelectedJobId(created.jobId);
+          setSelectedEventId(null);
+          setVideoSource(apiMode === 'http' ? 'stream' : 'job');
+          return created;
+        }}
         onDelete={jobsState.deleteJob}
         onRetry={jobsState.retryJob}
       />
@@ -143,28 +198,105 @@ export default function App() {
           </div>
         )}
 
-        {job && playable && season && videoSrc && (
+        {job && playable && season && jobVideoSrc && (
           <>
             {job.status !== 'complete' && (
               <div className={`media-status ${job.status === 'failed' ? 'failed' : ''}`}>
                 {job.status === 'failed' ? (
                   <>
-                    Analysis failed, but the downloaded video is still available.{' '}
+                    Pipeline failed, but the selected video source is still available.{' '}
                     <span className="muted">{job.error}</span>
                   </>
                 ) : (
                   <>
-                    Local video ready. Analysis is {job.status}
+                    {videoSource === 'stream' ? 'Ad-free yt-dlp stream ready.' : 'Local video ready.'}{' '}
+                    Pipeline is {job.status}
                     {job.stage ? ` · ${job.stage}` : ''}
                     {job.progress != null ? ` · ${Math.round(job.progress * 100)}%` : ''}.
                   </>
                 )}
               </div>
             )}
+            <div className="video-source" aria-label="Video source">
+              <div className="video-source-main">
+                <span className="video-source-label">Video</span>
+                <button
+                  type="button"
+                  className={videoSource === 'job' ? 'on' : ''}
+                  disabled={apiMode === 'http' && !job.localPath}
+                  title={job.localPath ? 'Play the downloaded match segment' : 'Available after yt-dlp finishes the local download'}
+                  onClick={() => {
+                    setLocalVideo(null);
+                    setVideoAlignment('segment');
+                    setVideoSource('job');
+                  }}
+                >
+                  Downloaded file
+                </button>
+                {apiMode === 'http' && (
+                  <button
+                    type="button"
+                    className={videoSource === 'stream' ? 'on' : ''}
+                    onClick={() => {
+                      setLocalVideo(null);
+                      setVideoSource('stream');
+                    }}
+                  >
+                    yt-dlp stream
+                  </button>
+                )}
+                <label className={`video-file-button ${videoSource === 'local' ? 'on' : ''}`}>
+                  Choose matching video…
+                  <input type="file" accept="video/*,.mp4,.mov,.webm,.m4v" onChange={chooseLocalVideo} />
+                </label>
+                {localVideo && <strong className="video-source-name" title={localVideo.name}>{localVideo.name}</strong>}
+              </div>
+
+              {videoSource === 'stream' && (
+                <div className="video-source-alignment">
+                  <span className="video-source-note stream">
+                    Ad-free native stream resolved by local yt-dlp · video and audio stay on localhost.
+                  </span>
+                </div>
+              )}
+
+              {videoSource === 'local' && localVideo && (
+                <div className="video-source-alignment">
+                  <label>
+                    Timing
+                    <select
+                      value={videoAlignment}
+                      onChange={(event) => setVideoAlignment(event.target.value as VideoAlignment)}
+                    >
+                      <option value="segment">Clipped match segment (starts at 0:00)</option>
+                      <option value="original">
+                        Full original recording (match starts at {job.startOffset}s)
+                      </option>
+                    </select>
+                  </label>
+                  <span className="video-source-note">
+                    Boxes use this job's tracks. Select the exact recording analyzed for this job so robots and timestamps line up.
+                  </span>
+                </div>
+              )}
+            </div>
+
             <VideoPlayer
               job={playable}
               season={season}
-              src={videoSrc}
+              src={
+                videoSource === 'stream' && streamVideoSrc
+                  ? streamVideoSrc
+                  : videoSource === 'local' && localVideo
+                    ? localVideo.url
+                    : jobVideoSrc
+              }
+              audioSrc={videoSource === 'stream' ? streamAudioSrc ?? undefined : undefined}
+              mediaStartSeconds={
+                videoSource === 'stream' || (videoSource === 'local' && videoAlignment === 'original')
+                  ? job.startOffset
+                  : 0
+              }
               tracks={match.tracks}
               events={match.events}
               confidenceThreshold={confidenceThreshold}

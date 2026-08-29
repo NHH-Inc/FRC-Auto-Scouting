@@ -217,12 +217,10 @@ export interface Correction {
 }
 
 /**
- * A job whose media metadata has arrived. The player and timeline need real numbers, and
- * only a downloaded job has them -- so they narrow to this rather than defaulting a duration
- * and silently rendering a wrong scrub bar.
+ * A job whose media metadata has arrived. A yt-dlp stream can be playable before the merged
+ * local file exists, so localPath remains nullable while the timeline fields narrow to numbers.
  */
 export interface PlayableJob extends Job {
-  localPath: string;
   duration: number;
   fps: number;
   width: number;
@@ -232,9 +230,6 @@ export interface PlayableJob extends Job {
 export function isPlayable(job: Job | null): job is PlayableJob {
   return (
     job != null &&
-    // No local_path means there is no segment file to load, whatever the metadata says.
-    typeof job.localPath === 'string' &&
-    job.localPath.length > 0 &&
     job.duration != null && job.fps != null &&
     job.width != null && job.height != null &&
     job.duration > 0

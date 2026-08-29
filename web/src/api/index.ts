@@ -75,6 +75,9 @@ export interface ScoutingApi {
 
   /** GET /api/video/:job_id -- the local segment file the player streams. */
   videoUrl(job: Job): string;
+  /** yt-dlp-resolved DASH video and audio, proxied locally without a YouTube player. */
+  streamVideoUrl(job: Job): string;
+  streamAudioUrl(job: Job): string;
 }
 
 export class ApiError extends Error {

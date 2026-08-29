@@ -27,6 +27,42 @@ class FakeYoutubeDL:
             hook({"status": "finished"})
         Path(self.options["outtmpl"]).write_bytes(b"local mp4")
 
+    def extract_info(self, url, download=False):
+        self.urls = [url]
+        return {
+            "requested_formats": [
+                {
+                    "url": "https://media.example/video.mp4?signature=test",
+                    "protocol": "https",
+                    "format_id": "136",
+                    "vcodec": "avc1",
+                    "acodec": "none",
+                    "http_headers": {"User-Agent": "yt-dlp-test"},
+                },
+                {
+                    "url": "https://media.example/audio.m4a?signature=test",
+                    "protocol": "https",
+                    "format_id": "140",
+                    "vcodec": "none",
+                    "acodec": "mp4a",
+                    "http_headers": {"User-Agent": "yt-dlp-test"},
+                },
+            ],
+        }
+
+
+class FakeCombinedYoutubeDL(FakeYoutubeDL):
+    def extract_info(self, url, download=False):
+        self.urls = [url]
+        return {
+            "url": "https://media.example/combined.mp4?signature=test",
+            "protocol": "https",
+            "format_id": "22",
+            "ext": "mp4",
+            "vcodec": "avc1",
+            "acodec": "mp4a",
+        }
+
 
 class TimestampTests(unittest.TestCase):
     def test_numeric_and_clock_timestamps(self):
@@ -99,6 +135,24 @@ class DownloaderTests(unittest.TestCase):
 
         self.assertEqual(actual, str(expected))
         youtube_dl.assert_not_called()
+
+    @patch("ingest.downloader.yt_dlp.YoutubeDL", FakeYoutubeDL)
+    def test_stream_resolver_selects_one_video_audio_file_and_caches_it(self):
+        first = self.downloader.resolve_stream("abcdefghijk")
+        second = self.downloader.resolve_stream("abcdefghijk")
+
+        self.assertEqual(first["video"]["url"], "https://media.example/video.mp4?signature=test")
+        self.assertEqual(first["audio"]["url"], "https://media.example/audio.m4a?signature=test")
+        self.assertEqual(second, first)
+        self.assertEqual(len(FakeYoutubeDL.instances), 1)
+        self.assertIn("vcodec^=avc1", FakeYoutubeDL.instances[0].options["format"])
+
+    @patch("ingest.downloader.yt_dlp.YoutubeDL", FakeCombinedYoutubeDL)
+    def test_stream_resolver_reuses_combined_format_for_hidden_audio(self):
+        resolved = self.downloader.resolve_stream("abcdefghijk")
+
+        self.assertEqual(resolved["video"]["url"], resolved["audio"]["url"])
+        self.assertEqual(resolved["audio"]["content_type"], "audio/mp4")
 
 
 if __name__ == "__main__":
