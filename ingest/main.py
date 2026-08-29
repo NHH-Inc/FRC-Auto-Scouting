@@ -22,6 +22,7 @@ from . import database, downloader, models, orchestrator, sheets, stats, tba
 from .corrections import apply_corrections, apply_track_corrections
 from .serializers import (
     JOB_STATUSES,
+    SCHEMA_VERSION,
     correction_to_dict,
     event_to_dict,
     job_to_dict,
@@ -882,7 +883,9 @@ async def stream_video(
 def health():
     return {
         "status": "ok",
-        "schema_version": 1,
+        # Read the constant, never a literal -- this one silently stayed at 1
+        # through two version bumps.
+        "schema_version": SCHEMA_VERSION,
         "statuses": sorted(JOB_STATUSES),
         "dependencies": video_downloader.dependency_status(),
     }

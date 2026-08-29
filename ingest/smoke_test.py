@@ -144,6 +144,14 @@ def main():
     check("job carries attempt + timestamps", job["attempt"] >= 1 and job["updated_at"].endswith("Z"))
     check("schema_version is 3", job["schema_version"] == 3)
 
+    # The health endpoint used to hardcode its version and silently stayed at 1 through two
+    # bumps. Assert against the contracts file so it cannot drift again.
+    declared = int((ROOT / "contracts" / "SCHEMA_VERSION").read_text(encoding="utf-8").strip())
+    h = client.get("/api/health").json()
+    check("health reports the contracts SCHEMA_VERSION",
+          h.get("schema_version") == declared, f"{h.get('schema_version')} != {declared}")
+    check("every serialized record matches it too", job["schema_version"] == declared)
+
     failed_job = next(j for j in body["jobs"] if j["status"] == "failed")
     check("failed job carries an error_code", failed_job["error_code"] == "rate_limited",
           str(failed_job.get("error_code")))

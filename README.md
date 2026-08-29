@@ -20,6 +20,8 @@ shared surface and nothing in `/contracts/` changes without all three people agr
 | `fixtures/` | — | — | Golden test data. **Owned by everyone.** |
 | `docs/` | — | — | The four context documents |
 
+**New here, or just want to run it?** `docs/RUNNING.md` has every command, Windows-first.
+
 ## Start here
 
 1. `docs/frc-scouting-0-contract.md` — read before anything else
@@ -47,13 +49,15 @@ From the repository root, start the ingest API:
 
     python3 -m venv .venv
     .venv/bin/pip install -r ingest/requirements.txt
-    .venv/bin/uvicorn ingest.main:app --reload --port 8080
+    .\ingest\.venv\Scripts\python -m uvicorn ingest.main:app --reload --port 8080
+    # POSIX: ingest/.venv/bin/python -m uvicorn ingest.main:app --reload --port 8080
 
 In a second terminal, start the web app in HTTP mode:
 
     cd web
     npm install
-    VITE_API_MODE=http npm run dev
+    # put VITE_API_MODE=http in web/.env.local, then:
+    npm run dev
 
 Open `http://localhost:5173`, paste a YouTube link, and queue it. An ad-free native preview starts
 after metadata resolves while yt-dlp stores the local MP4 under `data/segments/`. The player remains
@@ -77,11 +81,12 @@ future model integrations must follow.
 
 Optional authenticated videos can use a browser cookie source:
 
-    YTDLP_COOKIES_FROM_BROWSER=chrome .venv/bin/uvicorn ingest.main:app --port 8080
+    $env:YTDLP_COOKIES_FROM_BROWSER = 'chrome'
+    .\ingest\.venv\Scripts\python -m uvicorn ingest.main:app --port 8080
 
 Run the focused ingest tests with:
 
-    .venv/bin/python -m unittest discover -s ingest/tests -v
+    .\ingest\.venv\Scripts\python -m pytest ingest\tests -q
 
 ## Collecting training frames with local vision models
 
@@ -115,5 +120,5 @@ them, degrading rather than failing.
 ## Checks
 
     cd web && npm run typecheck && npm run build && npm run validate:fixtures
-    ingest\.venv\Scripts\python -m ingest.smoke_test     # 57 Contract E checks
+    ingest\.venv\Scripts\python -m ingest.smoke_test     # 67 Contract E checks
     ingest\.venv\Scripts\python -m pytest ingest/tests -q

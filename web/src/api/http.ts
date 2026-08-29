@@ -1,4 +1,4 @@
-// Contract E, spoken over HTTP to component 2, SCHEMA_VERSION 2.
+// Contract E, spoken over HTTP to component 2, SCHEMA_VERSION 3.
 //
 // Every endpoint here is one from doc 0. Errors come back as standard status codes with
 // {"error_code": "...", "error": "message"}. Collection endpoints return objects, never bare
