@@ -67,6 +67,17 @@ Run the focused ingest tests with:
 
     .venv/bin/python -m unittest discover -s ingest/tests -v
 
+## Collecting training frames with local vision models
+
+The offline collection workflow extracts hashed frames from a downloaded segment and compares
+robot-box proposals from three local Ollama vision models. See `docs/data-collection.md` for setup,
+commands, output files, and the required human-review boundary.
+
+Ollama connects through `http://127.0.0.1:11434` as configured in
+`configs/data_collection.example.yaml`. Generated frames, manifests, per-model proposals, and
+comparison reports are written to the Git-ignored `data/collections/<collection-id>/` directory.
+They are review inputs, not accepted training labels or analyzer output.
+
 ## Checking a component against the contracts
 
     cd web && npm run validate:fixtures

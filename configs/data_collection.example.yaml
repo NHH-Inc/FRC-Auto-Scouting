@@ -1,0 +1,29 @@
+season: 2026
+game: REBUILT
+storage:
+  root: data
+  segments: data/segments
+  collections: data/collections
+  datasets: data/datasets
+sampling:
+  fps: 2.0
+  image_format: jpg
+  jpeg_quality: 95
+  include_endpoints: true
+split:
+  seed: 20260829
+  train: 0.70
+  val: 0.15
+  test: 0.15
+classes:
+  - {name: robot, id: 0}
+quality:
+  allow_empty_frames: true
+  exclude_flags: [replay_closeup, camera_cut, unreadable_frame]
+ollama:
+  url: http://127.0.0.1:11434
+  models:
+    - qwen3-vl:4b
+    - qwen2.5vl:7b
+    - gemma3:4b
+  iou_threshold: 0.50
