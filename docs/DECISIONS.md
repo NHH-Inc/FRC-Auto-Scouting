@@ -128,9 +128,8 @@ support RDNA3 on Windows (gfx1101), so the three VLMs run GPU-accelerated for la
 16 GB VRAM holds all three at once.
 
 **H2 — Robert trains.** `settled`
-RTX 3060, ~40 GB free. CUDA, so the whole PyTorch ecosystem just works. Confirm whether it is
-the 12 GB or 8 GB card: 12 GB fine-tunes a detector at 640px comfortably, 8 GB needs smaller
-batches and gradient accumulation.
+RTX 3060 **12 GB**, ~40 GB free. CUDA, so the whole PyTorch ecosystem just works, and 12 GB
+fine-tunes a detector at 640px with a normal batch size — no gradient accumulation needed.
 
 40 GB free is the constraint, not the GPU. It is another reason the dataset lives on Roboflow
 (D8) rather than as local copies on three machines.
@@ -174,3 +173,18 @@ Three things to settle before counting on them:
 
 Used that way — offline, stateless, after hours, with permission — they are the best compute we
 have access to by a wide margin.
+
+## Pipeline status
+
+**P1 — Steps 4 and 5 of the labelling pipeline do not exist.** `open`
+Download, frame extraction and VLM annotation all work. **Human review and training do not** —
+there is no trainer anywhere in the repo, and Roboflow is decided but not set up.
+
+Worth stating plainly because "how do I run the training" is a reasonable question with an
+unreasonable answer right now. What is settled: RF-DETR on Robert's 12 GB card, dataset and
+review on Roboflow, detector and team-ID classifier trained separately from different data.
+
+**P2 — Component 1 is the critical path.** `open`
+The analysis binary compiles and satisfies Contract D, but has no detection pipeline, so a real
+job runs to `analysis_failed` and the player shows video with no boxes. Everything downstream is
+running on fixtures until this lands.

@@ -1,237 +1,300 @@
 # Running it
 
-Every command here is **PowerShell on Windows**, because that is what all three of us are on.
-POSIX equivalents are noted where they differ.
+PowerShell on Windows, because that is what all three of us use.
 
-Two PowerShell gotchas that will bite you first:
+**Every command block below starts with the folder you must be in.** Getting this wrong is the
+most common mistake — running the ingest setup from inside `web\` creates a junk venv at
+`web\ingest\.venv` and fails with *"Could not open requirements file"*.
 
-- A relative executable needs `.\` — `ingest\.venv\Scripts\python` alone gives
+Two PowerShell rules that catch people out:
+
+- A relative program needs `.\` in front. `ingest\.venv\Scripts\python` alone gives
   *"not recognized as the name of a cmdlet"*. Write `.\ingest\.venv\Scripts\python`.
-- Environment variables are `$env:NAME = 'value'`, not `NAME=value`. There is no inline
-  `VAR=x command` form.
+- Environment variables are `$env:NAME = 'value'`. There is no `NAME=value command` form.
 
-## Which mode do you want?
-
-| I want to… | Go to |
-|---|---|
-| Look at the UI, click around, try corrections | **A** — no backend needed |
-| Paste a YouTube link and watch it download and play | **B** |
-| Generate training frames with the local vision models | **C** |
-| Check I have not broken anything | **Verifying** |
+Throughout, **REPO** means `C:\Coding Stuff\Robotics\FRC-Auto-Scouting` — the folder containing
+`analysis\`, `ingest\`, `web\`.
 
 ---
 
-## One-time setup
+## What exists, and what does not
 
-Run these once per machine, from the repo root.
+Be clear on this before you go looking for a command that is not there.
 
-**Web app** (needs Node 20+):
+| Step | Status | How to run it |
+|---|---|---|
+| 1. Pull video off YouTube | **works** | Part 3 |
+| 2. Extract frames from a segment | **works** | Part 4 |
+| 3. Label frames with the 3 local models | **works** | Part 4 |
+| 4. Human review of those labels | **not built** | Roboflow, decided but not set up |
+| 5. Train a detector | **not built** | no training code exists yet |
+| 6. Analyse a match (the C++ backend) | **not built** | binary compiles, finds nothing |
+| 7. Review results in the web app | **works** | Part 2 |
+
+So: **there is no "run the training" command**, because nobody has written a trainer. Steps 1–3
+produce reviewable proposals; steps 4 and 5 are the gap. Step 6 is the critical path — until the
+analysis backend looks at a video, the web app only has fixture data to show.
+
+---
+
+## Part 1 — one-time setup
+
+Do this once per machine. Three separate steps, each in a **different folder**.
+
+### 1a. Web app — needs Node 20+
 
 ```bash
-cd web
+# in: REPO\web
+cd "C:\Coding Stuff\Robotics\FRC-Auto-Scouting\web"
 npm install
 ```
 
-**Ingest service** (needs Python 3.12+ and ffmpeg on PATH):
+### 1b. Ingest service — needs Python 3.12+ and ffmpeg on PATH
 
 ```bash
+# in: REPO   <- the ROOT, not web\
+cd "C:\Coding Stuff\Robotics\FRC-Auto-Scouting"
 python -m venv ingest\.venv
 .\ingest\.venv\Scripts\python -m pip install -r ingest\requirements.txt
 ```
 
-**Config**, if you are going past mode A:
+If you see `Could not open requirements file`, you are in the wrong folder. `cd` to REPO and
+retry. If you already made `web\ingest\`, delete it — it is junk:
 
 ```bash
+# in: REPO
+Remove-Item -Recurse -Force web\ingest
+```
+
+### 1c. Config
+
+```bash
+# in: REPO
 copy ingest\.env.example ingest\.env
 ```
 
-Then fill it in. Nothing in it is required — every value degrades rather than breaking — but
-without `TBA_API_KEY` you get no alliance data and no accuracy comparison. `.env` is gitignored;
-keep it that way.
+Then open `ingest\.env` and fill in what you have. Nothing is required — every setting degrades
+rather than breaking — but without `TBA_API_KEY` you get no alliance data and no accuracy check.
+The file is gitignored. Keep it that way, and never paste a key into chat.
 
 ---
 
-## A — the web app on fixtures, no backend
+## Part 2 — the web app on its own
 
-The fastest way to see the whole UI. Doc 0 asks for this explicitly: *"Component 3 builds the
-whole UI against fixture data with no backend running."*
+**No backend, no config, no Python.** This is the fastest way to see the whole UI and the right
+starting point if you just want to look at it.
 
 ```bash
-cd web
+# in: REPO\web
 npm run dev
 ```
 
-Open <http://localhost:5173>. You get the golden fixture match: a real 152-second video, seven
-tracks with boxes drawn over it, 224 events, working corrections, timeline, stats, heat map and
-export panel. Three jobs appear in the queue, including a failed one so you can try the retry
-path.
+Open <http://localhost:5173>.
 
-Nothing is mocked in the fake sense — it serves the real fixture data through the same
-`ScoutingApi` interface the HTTP client implements, so what renders here renders against the
-real backend too.
+You get the golden fixture match: a real 152-second video with boxes drawn over it, 224 events,
+working corrections, timeline, team stats, heat map, export panel. Three jobs in the queue,
+including a deliberately failed one so the retry path is reachable.
 
-Corrections you make are kept in browser storage. To reset, clear site data for localhost:5173.
+Nothing is faked — it serves the real fixture files through the same interface the HTTP client
+uses, so anything that renders here renders against the real backend.
+
+To reset corrections you have made: clear site data for `localhost:5173` in your browser.
 
 ---
 
-## B — the full stack
+## Part 3 — pulling video off YouTube
 
-Two terminals.
+This needs the ingest service running. **Two terminals.**
 
-**Terminal 1, the ingest service:**
+### Terminal 1 — the service
 
 ```bash
+# in: REPO
+cd "C:\Coding Stuff\Robotics\FRC-Auto-Scouting"
 .\ingest\.venv\Scripts\python -m uvicorn ingest.main:app --reload --port 8080
 ```
 
-Check it came up: <http://localhost:8080/api/health> should return
-`{"status":"ok","schema_version":3,...}`. Interactive API docs are at
-<http://localhost:8080/docs>.
+Check it is alive: <http://localhost:8080/api/health> should say
+`{"status":"ok","schema_version":3,...}`. Browsable API docs: <http://localhost:8080/docs>.
 
-**Terminal 2, the web app pointed at it.** Create `web\.env.local` with:
+### Terminal 2 — the web app, pointed at it
+
+First create the file `web\.env.local` containing one line:
 
 ```bash
 VITE_API_MODE=http
 ```
 
-then:
+A file, not `$env:`, because Vite only reads env vars at startup and you would lose it every time
+you close the terminal. Then:
 
 ```bash
-cd web
+# in: REPO\web
 npm run dev
 ```
 
-A file is better than `$env:VITE_API_MODE` because it survives closing the terminal, and Vite
-only reads env vars at startup. `.env.local` is gitignored.
-
 Now paste a YouTube link into the sidebar. The job walks
-`queued → downloading → downloaded → analyzing → complete`, and the player opens as soon as the
-local download finishes — you do not have to wait for analysis.
+`queued → downloading → downloaded → analyzing → complete`, and **the player opens as soon as the
+download finishes** — you do not wait for analysis.
 
-**Expect analysis to fail** for now, with `error_code: analysis_failed`. Component 1 has a
-contract-correct binary but no detection pipeline, so there is nothing to find yet. The download
-and the player both work; the boxes are what is missing.
+**Analysis will fail**, with `error_code: analysis_failed`. That is correct today: the download
+and the player work, but the C++ backend has no detection pipeline, so there is nothing to find.
+You will see the video and no boxes.
 
-If a video needs sign-in, pass cookies:
+Videos that need a login:
 
 ```bash
+# in: REPO
 $env:YTDLP_COOKIES_FROM_BROWSER = 'chrome'
 .\ingest\.venv\Scripts\python -m uvicorn ingest.main:app --port 8080
 ```
 
+Downloaded segments land in `data\segments\`. Note the filename — Part 4 needs it.
+
 ---
 
-## C — collecting training frames
+## Part 4 — labelling frames with the local models
 
-Needs [Ollama](https://ollama.com) and about 13 GB of disk for the models.
+### 4a. Install Ollama and the models (~13 GB)
 
 ```bash
+# anywhere
 winget install Ollama.Ollama
 ollama pull qwen3-vl:4b
 ollama pull qwen2.5vl:7b
 ollama pull gemma3:4b
+ollama list
 ```
 
-Ollama serves on `http://127.0.0.1:11434`, which is what
-`configs/data_collection.example.yaml` expects. Confirm it is up with `ollama list`.
+Ollama serves on `http://127.0.0.1:11434`, which is what the config expects.
 
-**Extract frames from a downloaded segment:**
+**On AMD:** Ollama supports RDNA3 on Windows, so an RX 7800 XT runs these on the GPU. PyTorch
+does *not* support AMD on Windows, which is why training happens on the NVIDIA machine.
+
+### 4b. Extract frames from a segment
+
+Use a file from `data\segments\` that Part 3 downloaded.
 
 ```bash
+# in: REPO
 .\ingest\.venv\Scripts\python -m ingest.collection.cli extract `
-  --segment data\segments\<file>.mp4 `
+  --segment data\segments\<the-file>.mp4 `
   --match-id 2026casf_qm42 `
   --video-id dQw4w9WgXcQ `
   --start-offset 120 `
   --config configs\data_collection.example.yaml
 ```
 
-**Then run the three models over them:**
+The backtick `` ` `` is PowerShell's line continuation. Put it all on one line if you prefer.
+
+It prints a **collection id**. Copy it.
+
+### 4c. Run the three models over those frames
 
 ```bash
+# in: REPO
 .\ingest\.venv\Scripts\python -m ingest.collection.cli annotate `
-  --collection <collection-id> `
+  --collection <the-collection-id> `
   --config configs\data_collection.example.yaml
 ```
 
-Output lands in `data\collections\<collection-id>\` — frames, a manifest, per-model proposals,
-and the IoU comparison report. `docs/data-collection.md` has the detail.
+Models load one at a time so they fit in memory. Output goes to
+`data\collections\<collection-id>\`: the frames, a manifest, each model's raw proposals kept
+separately, and the IoU comparison report.
 
-**These are review inputs, not training labels.** The whole point of keeping per-model raw
-output is that you can see where the models disagreed; feeding unreviewed consensus straight
-into training teaches the next model to reproduce this one's mistakes.
-
-### On AMD hardware
-
-Ollama supports RDNA3 on Windows, so an RX 7800 XT runs these GPU-accelerated. **PyTorch does
-not** — the ROCm wheels are Linux-only — so training happens on the NVIDIA machine. See
-`docs/DECISIONS.md` H1–H3.
+**These are proposals, not labels.** Keeping each model's raw output is what lets you see where
+they disagreed. Feeding unreviewed consensus straight into training teaches the next model to
+copy this one's mistakes — that is why step 4 in the table above exists.
 
 ---
 
-## Verifying
+## Part 5 — training
 
-Run all of it before pushing. CI runs the same four things.
+**There is no training code in this repo yet.** Nothing to run.
+
+What is decided and waiting for someone to build it:
+
+- Robert's RTX 3060 **12 GB** does the training. That is enough to fine-tune a detector at 640px
+  with a normal batch size — no gradient accumulation tricks needed.
+- Detector is RF-DETR (Apache 2.0). Not Ultralytics YOLO, which is AGPL-3.0 and needs a paid
+  licence for closed source.
+- The dataset lives on Roboflow, which is also the review UI step 4 needs.
+- The team-ID model is a **classifier** over robot crops, trained separately from the detector.
+  The detector learns from (image, box); the classifier learns from (crop, team).
+
+The correction UI in the web app is already producing human-verified `(track → team)` pairs, so
+the classifier has a real label source growing on its own. The detector does not — that is what
+steps 3 and 4 are for.
+
+---
+
+## Verifying nothing is broken
+
+Run before pushing. CI runs the same four things.
 
 ```bash
-cd web
+# in: REPO\web
 npm run typecheck
 npm run build
 npm run validate:fixtures
 ```
 
 ```bash
+# in: REPO
 .\ingest\.venv\Scripts\python -m pytest ingest\tests -q
 .\ingest\.venv\Scripts\python -m ingest.smoke_test
 ```
 
-What each one is actually checking:
-
-| Command | Checks |
+| Command | What it actually checks |
 |---|---|
-| `validate:fixtures` | Every fixture record against `contracts/*.schema.json`, plus cross-file invariants and the five required awkward cases |
-| `smoke_test` | 67 checks driving every Contract E endpoint against the golden fixtures — no network, no yt-dlp, no analysis binary |
-| `pytest` | The downloader, collection and API unit tests |
+| `validate:fixtures` | Every fixture record against `contracts\*.schema.json`, cross-file invariants, and the five required awkward cases |
+| `smoke_test` | 69 checks driving every Contract E endpoint against the fixtures — no network, no yt-dlp, no analysis binary |
+| `pytest` | Downloader, collection and API unit tests |
 
-**Component 1** is built by CI rather than locally, because not everyone has a C++ toolchain. To
-build it yourself you need CMake and a compiler:
+**The C++** is built by CI, so nobody needs a local toolchain. To build it yourself you need
+CMake and a compiler:
 
 ```bash
+# in: REPO
 cmake -S analysis -B analysis\build
 cmake --build analysis\build --config Release
 ```
 
-**Regenerating fixtures** (deterministic, so a clean regeneration is a no-op — CI fails if it
-is not):
+**Regenerating fixtures.** Deterministic, so a clean regeneration changes nothing and CI fails
+if it does:
 
 ```bash
-node fixtures\tools\generate_fixture.mjs            # includes the video, needs ffmpeg
-node fixtures\tools\generate_fixture.mjs --no-video # data only, much faster
+# in: REPO
+node fixtures\tools\generate_fixture.mjs --no-video   # data only, fast
+node fixtures\tools\generate_fixture.mjs              # also re-renders the video, needs ffmpeg
 ```
 
 ---
 
-## When something is wrong
+## When something goes wrong
 
-**`... is not recognized as the name of a cmdlet`** — you left off the `.\` on a relative path.
+**`Could not open requirements file`** — you are in `web\`. `cd` to REPO. Delete any
+`web\ingest\` folder you created.
 
-**Port 5173 or 8080 already in use** — something is still running from last time:
+**`... is not recognized as the name of a cmdlet`** — missing `.\` on a relative program.
+
+**Port already in use:**
 
 ```bash
 Get-NetTCPConnection -LocalPort 5173 -State Listen | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }
 ```
 
-**The web app shows jobs but no events, and the browser console mentions a module that "does not
-provide an export"** — Vite is holding a stale module graph, usually after a `git pull` or branch
-switch changed files under it. Restart the dev server; a page refresh is not enough.
+**Jobs appear but no events, and the browser console says a module "does not provide an
+export"** — Vite is holding a stale module graph, usually after a `git pull` changed files under
+it. **Restart the dev server**; refreshing the page will not fix it. This looks exactly like a
+code bug and is not one.
 
-**Export returns 503** — that is correct when `SHEETS_SPREADSHEET_ID` and
+**Export returns 503** — correct when `SHEETS_SPREADSHEET_ID` and
 `GOOGLE_APPLICATION_CREDENTIALS` are not both set. It refuses rather than reporting a write that
-never happened. See `docs/DECISIONS.md` D11.
+never happened.
 
-**`alliances` and `tba_score` come back null** — no `TBA_API_KEY`, or TBA genuinely has no data
-for that match. Both are legal; component 1 falls back to raw OCR without elimination.
+**`alliances` and `tba_score` are null** — no `TBA_API_KEY`, or TBA has no data for that match.
+Both are legal.
 
-**A job fails immediately** — read `error_code` on the job record, not just the message. It is a
-closed enum, and it tells you whether retrying is worth it: `rate_limited` yes,
-`video_unavailable` no.
+**A job failed** — read `error_code`, not just the message. It is a closed set and tells you
+whether retrying helps: `rate_limited` yes, `video_unavailable` no.
