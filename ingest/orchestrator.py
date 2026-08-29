@@ -1,6 +1,6 @@
 """Contract D -- invoking the analysis binary.
 
-    analysis --job <path/to/job.json> --out <output/dir>
+    analysis --job <job.json> --season <season.json> --out <output/dir>
 
 On success: exit 0, and events.jsonl, tracks.jsonl and result.json exist in <out>.
 On failure: nonzero exit, human-readable reason on stderr.
@@ -11,13 +11,16 @@ import json
 import subprocess
 from pathlib import Path
 
+# The subset of error_code values component 1 is allowed to report.
+ANALYSIS_ERROR_CODES = {"analysis_failed", "timeout", "internal", "no_match_data"}
+
 
 class AnalysisOrchestrator:
     def __init__(self, binary_path: str, output_base_dir: str = "/data/jobs"):
         self.binary_path = binary_path
         self.output_base_dir = Path(output_base_dir)
 
-    def run_job(self, job_data: dict, on_progress=None) -> dict:
+    def run_job(self, job_data: dict, season_path: str, on_progress=None) -> dict:
         job_id = job_data["job_id"]
         job_dir = self.output_base_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
@@ -26,7 +29,14 @@ class AnalysisOrchestrator:
         with open(job_config_path, "w", encoding="utf-8") as handle:
             json.dump(job_data, handle)
 
-        cmd = [self.binary_path, "--job", str(job_config_path), "--out", str(job_dir)]
+        # Contract D v2: the season config is passed in, so component 1 reads phase
+        # boundaries and field dimensions from the same file component 3 does.
+        cmd = [
+            self.binary_path,
+            "--job", str(job_config_path),
+            "--season", str(season_path),
+            "--out", str(job_dir),
+        ]
 
         process = subprocess.Popen(
             cmd,
@@ -60,9 +70,14 @@ class AnalysisOrchestrator:
             process.stderr.close()
 
         if returncode != 0:
-            raise RuntimeError(
-                f"analysis exited {returncode}: {stderr.strip() or 'no reason on stderr'}"
-            )
+            # Contract D: the LAST line of stderr is an error_code enum value, so
+            # component 2 can classify without parsing prose.
+            lines = [ln for ln in stderr.strip().splitlines() if ln.strip()]
+            code = lines[-1].strip() if lines else ""
+            reason = "\n".join(lines[:-1]) if len(lines) > 1 else (code or "no reason on stderr")
+            err = RuntimeError(f"analysis exited {returncode}: {reason}")
+            err.error_code = code if code in ANALYSIS_ERROR_CODES else None
+            raise err
 
         outputs = {
             "events_path": str(job_dir / "events.jsonl"),

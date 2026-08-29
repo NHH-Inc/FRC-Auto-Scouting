@@ -257,9 +257,77 @@ def main():
           str(sorted(s))[:140])
     check("cycle time computed", s["avg_cycle_seconds"] is not None)
 
+    # Without credentials the export must refuse rather than report a write that never
+    # happened. Doc 3 treats the spreadsheet URL as required, and there is no URL to give.
     r = client.post("/api/export/sheets", json={"match_ids": [MATCH], "mode": "aggregate"})
-    check("export returns a URL and rows_skipped",
-          "spreadsheet_url" in r.json() and "rows_skipped" in r.json())
+    check("unconfigured export returns 503, not a fake success", r.status_code == 503,
+          str(r.status_code))
+    r = client.post("/api/export/sheets", json={"match_ids": [], "mode": "aggregate"})
+    check("export with no matches is rejected", r.status_code == 400)
+
+    print("\nSheets row building (pure, no API)")
+    from ingest import sheets as sheets_mod
+    from ingest import stats as stats_mod
+
+    events = client.get(f"/api/matches/{MATCH}/events").json()["events"]
+    cfg = stats_mod.season_config(2026)
+    teams = sorted({e["team"] for e in events if e.get("team") is not None})
+    stat_rows = [stats_mod.team_stats(t, events, cfg, "2026casf", 1) for t in teams]
+
+    headers, rows = sheets_mod.build_rows("aggregate", [(MATCH, events, stat_rows)])
+    check("aggregate mode is one row per team per match", len(rows) == len(teams),
+          f"{len(rows)} rows for {len(teams)} teams")
+    check("aggregate row key is match|team", rows[0][0] == f"{MATCH}|{teams[0]}", str(rows[0][0]))
+    check("row width matches the header", all(len(r) == len(headers) for r in rows))
+
+    raw_headers, raw_rows = sheets_mod.build_rows("raw", [(MATCH, events, stat_rows)])
+    check("raw mode is one row per event", len(raw_rows) == len(events))
+    check("raw row key is the event_id", raw_rows[0][0] == events[0]["event_id"])
+    check("raw row width matches its header", all(len(r) == len(raw_headers) for r in raw_rows))
+    # Idempotence rests on these being unique and stable.
+    check("every row key is unique", len({r[0] for r in raw_rows}) == len(raw_rows))
+
+    print("\nTBA client (injected fetch, no network)")
+    from ingest import tba as tba_mod
+
+    sample = {
+        "key": MATCH,
+        "alliances": {
+            "red": {"score": 91, "team_keys": ["frc254", "frc1678", "frc971"]},
+            "blue": {"score": 84, "team_keys": ["frc118", "frc148", "frc2056"]},
+        },
+        "videos": [{"type": "youtube", "key": "dQw4w9WgXcQ?t=120"}],
+    }
+    tc = tba_mod.TBAClient(api_key="test", fetch=lambda path: sample)
+    alliances, score = tc.alliances_and_score(MATCH)
+    check("frc prefix is stripped at the ingest boundary",
+          alliances == {"red": [254, 1678, 971], "blue": [118, 148, 2056]}, str(alliances))
+    check("tba_score comes through", score == {"red": 91, "blue": 84}, str(score))
+
+    # An unplayed match reports -1; that is not a score.
+    unplayed = {"alliances": {
+        "red": {"score": -1, "team_keys": ["frc1", "frc2", "frc3"]},
+        "blue": {"score": -1, "team_keys": ["frc4", "frc5", "frc6"]}}}
+    tc2 = tba_mod.TBAClient(api_key="test", fetch=lambda path: unplayed)
+    _, unplayed_score = tc2.alliances_and_score(MATCH)
+    check("an unplayed match has no score", unplayed_score is None, str(unplayed_score))
+
+    # A partial alliance is worse than none: component 1 uses it for elimination.
+    partial = {"alliances": {
+        "red": {"score": 10, "team_keys": ["frc1", "frc2"]},
+        "blue": {"score": 9, "team_keys": ["frc4", "frc5", "frc6"]}}}
+    tc3 = tba_mod.TBAClient(api_key="test", fetch=lambda path: partial)
+    partial_alliances, _ = tc3.alliances_and_score(MATCH)
+    check("a partial alliance is rejected", partial_alliances is None, str(partial_alliances))
+
+    check("no API key means no calls and no crash",
+          tba_mod.TBAClient(api_key="").alliances_and_score(MATCH) == (None, None))
+    check("event_key_of splits the match key",
+          tba_mod.event_key_of("2026casf_qm42") == "2026casf")
+
+    tc4 = tba_mod.TBAClient(api_key="test", fetch=lambda path: [sample])
+    check("video id resolves to a match key despite a &t= suffix",
+          tc4.find_match_for_video("dQw4w9WgXcQ", "2026casf") == MATCH)
 
     r = client.post(f"/api/jobs/{failed_job['job_id']}/retry")
     check("POST retry reuses the job id", r.json()["job_id"] == failed_job["job_id"])

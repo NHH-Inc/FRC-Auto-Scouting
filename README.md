@@ -70,3 +70,23 @@ Run the focused ingest tests with:
 ## Checking a component against the contracts
 
     cd web && npm run validate:fixtures
+
+## Configuration
+
+Component 2 reads these from the environment. All are optional; the service runs without
+them, degrading rather than failing.
+
+| Variable | Effect when unset |
+|---|---|
+| `TBA_API_KEY` | `alliances` and `tba_score` stay null. Component 1 falls back to raw OCR without elimination, and the accuracy comparison has nothing to score against. |
+| `SHEETS_SPREADSHEET_ID` + `GOOGLE_APPLICATION_CREDENTIALS` | `POST /api/export/sheets` returns 503 rather than reporting a write that did not happen. Share the sheet with the service account. |
+| `DATABASE_URL` | SQLite at `./frc_scouting.db`. Set to a Postgres URL in production. |
+| `FRC_DATA_DIR` | `./data` — segments in `data/segments/`, job output in `data/jobs/`. |
+| `ANALYSIS_BINARY` | `./analysis/build/bin/analysis` |
+| `FRC_DEFAULT_SEASON` | `2026`, used when a job does not name a season. |
+
+## Checks
+
+    cd web && npm run typecheck && npm run build && npm run validate:fixtures
+    ingest\.venv\Scripts\python -m ingest.smoke_test     # 57 Contract E checks
+    ingest\.venv\Scripts\python -m pytest ingest/tests -q

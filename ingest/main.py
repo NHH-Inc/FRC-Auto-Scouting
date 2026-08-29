@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
-from . import database, downloader, models, orchestrator, stats
+from . import database, downloader, models, orchestrator, sheets, stats, tba
 from .corrections import apply_corrections, apply_track_corrections
 from .serializers import (
     JOB_STATUSES,
@@ -73,6 +73,17 @@ app.add_middleware(
 )
 
 DEFAULT_SEASON = int(os.environ.get("FRC_DEFAULT_SEASON", "2026"))
+SEASONS_DIR = Path(__file__).resolve().parent.parent / "contracts" / "seasons"
+
+tba_client = tba.TBAClient()
+sheets_exporter = sheets.SheetsExporter()
+
+
+def _season_path(season: int) -> Path:
+    path = SEASONS_DIR / f"{season}.json"
+    if not path.exists():
+        raise RuntimeError(f"No season config at contracts/seasons/{season}.json")
+    return path
 
 database.init_db()
 
@@ -151,6 +162,14 @@ async def create_job(
         width=info.get("width"),
         height=info.get("height"),
     )
+    # Doc 1: the three teams per alliance are what make robot identification tractable,
+    # and tba_score is the only thing the accuracy comparison can be scored against.
+    # A missing key or an unplayed match leaves both null, which Contract A allows.
+    if db_job.match_id:
+        alliances, tba_score = tba_client.alliances_and_score(db_job.match_id)
+        db_job.alliances = alliances
+        db_job.tba_score = tba_score
+
     db.add(db_job)
     db.commit()
     db.refresh(db_job)
@@ -299,17 +318,21 @@ def process_job(job_id: str, url: str):
             job.stage = stage
             db.commit()
 
-        results = analysis_orchestrator.run_job(job_data, on_progress=on_progress)
+        results = analysis_orchestrator.run_job(
+            job_data, season_path=str(_season_path(job.season)), on_progress=on_progress
+        )
         import_results(db, job, results)
         set_status("complete", progress=1.0, stage=None, error=None)
 
     except Exception as exc:
         # Doc 2: "treat a failed download as an expected condition, not a crash." Keep the
         # reason -- a retry the user cannot reason about is not much of a retry path.
+        # Component 1 reports its own error_code on the last line of stderr; trust it
+        # over our string matching when it gave us one.
         set_status(
             "failed",
             error=str(exc)[:1000],
-            error_code=_classify(exc),
+            error_code=getattr(exc, "error_code", None) or _classify(exc),
             progress=None,
             stage=None,
         )
@@ -711,34 +734,48 @@ def get_team_stats(
 def export_to_sheets(payload: dict, db: Session = Depends(get_db)):
     """Doc 3: "Sheets is an export destination, not storage."
 
-    Still a stub for the Google API call itself, but it now returns the shape component 3
-    consumes -- crucially a spreadsheet URL, without which the UI cannot link the user to
-    what it just wrote. See OPEN_QUESTIONS.md #6.
+    One row per team per match in aggregate mode, one row per event in raw mode. Writes are
+    batched into a single API call, and every row carries a stable key so re-exporting the
+    same matches updates in place instead of duplicating.
     """
     match_ids = payload.get("match_ids", [])
     mode = payload.get("mode", "aggregate")
     if mode not in ("raw", "aggregate"):
         raise HTTPException(status_code=400, detail="mode must be 'raw' or 'aggregate'")
+    if not match_ids:
+        raise HTTPException(status_code=400, detail="match_ids is required")
 
-    rows = 0
+    per_match = []
     for match_id in match_ids:
         events = _events_for(db, match_id, 0.0, raw=False)
-        if mode == "raw":
-            rows += len(events)
-        else:
-            rows += len({e.get("team") for e in events if e.get("team") is not None})
+        job = db.query(models.Job).filter(models.Job.match_id == match_id).first()
+        cfg = stats.season_config(job.season) if job else None
+        teams = sorted({e["team"] for e in events if e.get("team") is not None})
+        stats_list = [
+            stats.team_stats(team, events, cfg, tba.event_key_of(match_id), 1)
+            for team in teams
+        ]
+        per_match.append((match_id, events, stats_list))
 
-    spreadsheet_id = os.environ.get("SHEETS_SPREADSHEET_ID", "")
+    headers, rows = sheets.build_rows(mode, per_match)
+    result = sheets_exporter.export(mode, headers, rows)
+
+    if not result.get("configured"):
+        # Be honest rather than reporting a successful write that did not happen.
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Sheets export is not configured. Set SHEETS_SPREADSHEET_ID and "
+                "GOOGLE_APPLICATION_CREDENTIALS, and share the sheet with the service account."
+            ),
+        )
+
     return {
-        "spreadsheet_id": spreadsheet_id,
-        "spreadsheet_url": (
-            f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
-            if spreadsheet_id
-            else ""
-        ),
-        "rows_written": rows,
-        "rows_skipped": 0,
+        "spreadsheet_id": sheets_exporter.spreadsheet_id,
+        "spreadsheet_url": sheets_exporter.spreadsheet_url(),
         "mode": mode,
+        "rows_written": result["rows_written"],
+        "rows_skipped": result["rows_skipped"],
     }
 
 
