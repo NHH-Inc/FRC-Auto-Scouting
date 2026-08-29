@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { EventType } from '../contracts';
 import type { ViewEvent } from '../lib/corrections';
 import { EVENT_LABEL } from '../lib/format';
-import { FIELD } from '../season';
+import { fieldExtents, type SeasonConfig } from '../season';
 
 // Doc 3: "Field heat maps, once homography is working, showing where a robot spends time."
 //
@@ -21,16 +21,19 @@ const GRID_Y = 36;
 const SIGMA = 1.6; // grid cells
 
 export interface HeatMapProps {
+  season: SeasonConfig;
   events: ViewEvent[];
   selectedTeam: number | null;
   eventTypes?: EventType[];
 }
 
 export function HeatMap({
+  season,
   events,
   selectedTeam,
   eventTypes = ['shot_made', 'shot_attempt'],
 }: HeatMapProps) {
+  const FIELD = fieldExtents(season);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const { points, missing } = useMemo(() => {

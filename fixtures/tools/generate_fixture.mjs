@@ -1,14 +1,20 @@
-// Regenerates fixtures/2026casf_qm42/ -- the one fully worked example doc 0 asks for.
+// Regenerates /fixtures/ -- the worked examples doc 0 asks for, at SCHEMA_VERSION 2.
 //
-// Deterministic: same seed in, byte-identical JSON out. Run with:
+// Deterministic: same seed in, byte-identical JSON out (UUIDs included). Run with:
 //     node fixtures/tools/generate_fixture.mjs
 // Requires ffmpeg on PATH for segment.mp4 (pass --no-video to skip).
 //
-// The synthetic match is authored here rather than hand-typed so that the video, the
-// tracks and the events are guaranteed to agree: robot positions come from one motion
-// model, the video renders that model at 30 fps, tracks.jsonl samples it at 5 Hz, and
-// events.jsonl is emitted from the same schedule. If a box in the UI does not sit on the
-// robot under it, that is a real bug in component 3, not fixture drift.
+// The synthetic match is authored here rather than hand-typed so the video, the tracks and
+// the events are guaranteed to agree: robot positions come from one motion model, the video
+// renders that model at 30 fps, tracks.jsonl samples it, and events.jsonl comes off the same
+// schedule. A box that does not sit on the robot under it is a real bug, not fixture drift.
+//
+// Doc 0 requires the awkward cases, not just the happy path. All five are covered:
+//   - a track with a `shot_change` gap            -> every robot track, 61.2-65.4
+//   - an unidentified track with `team: null`     -> track 14
+//   - a match-level event with `track_id: null`   -> match_start / phase_change / match_end
+//   - a failed job with an `error_code`           -> fixtures/failed_download/
+//   - a match with `alliances: null`              -> fixtures/2026casf_qm43_no_tba/
 
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -17,27 +23,31 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
-const OUT = resolve(ROOT, 'fixtures', '2026casf_qm42');
-const SEASON = JSON.parse(readFileSync(resolve(ROOT, 'contracts', 'season_2026.json'), 'utf8'));
+const FIXTURES = resolve(ROOT, 'fixtures');
+const OUT = resolve(FIXTURES, '2026casf_qm42');
+const SEASON_YEAR = 2026;
+const SEASON = JSON.parse(
+  readFileSync(resolve(ROOT, 'contracts', 'seasons', `${SEASON_YEAR}.json`), 'utf8')
+);
 
 // ---------------------------------------------------------------- constants
 
 const JOB_ID = 'f81d4fae-7dec-11d0-a765-00a0c91e6bf6';
 const MATCH_ID = '2026casf_qm42';
 const VIDEO_ID = 'dQw4w9WgXcQ';
-const START_OFFSET = 120.0; // segment was clipped out of a long event stream
+const START_OFFSET = 120.0;
 const DURATION = 152.0;
 const FPS = 30;
 const W = 640;
 const H = 360;
 const BOX_HZ = 5; // deliberately != FPS so component 3 must interpolate
 
-const FIELD_L = SEASON.field.length_ft; // 54
-const FIELD_W = SEASON.field.width_ft; // 27
-const T_AUTO_END = SEASON.periods.auto_seconds; // 15
-const T_ENDGAME =
-  T_AUTO_END + SEASON.periods.teleop_seconds - SEASON.periods.endgame_seconds; // 130
-const T_MATCH_END = T_AUTO_END + SEASON.periods.teleop_seconds; // 150
+const FIELD_L = SEASON.field_length_ft;
+const FIELD_W = SEASON.field_width_ft;
+const AUTO = SEASON.auto_seconds;
+const TELEOP = SEASON.teleop_seconds;
+const ENDGAME = SEASON.endgame_seconds;
+const T_MATCH_END = AUTO + TELEOP;
 
 // mulberry32, so the fixture is reproducible
 function makeRng(seed) {
@@ -57,27 +67,58 @@ const r2 = (n) => Math.round(n * 100) / 100;
 const smooth = (u) => u * u * (3 - 2 * u);
 const clamp01 = (u) => (u < 0 ? 0 : u > 1 ? 1 : u);
 
+/** Deterministic UUIDv4 from the seeded RNG, so regeneration stays byte-identical. */
+function uuid() {
+  const hex = [];
+  for (let i = 0; i < 32; i++) hex.push(Math.floor(rnd() * 16).toString(16));
+  hex[12] = '4';
+  hex[16] = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
+  const s = hex.join('');
+  return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`;
+}
+
+// Doc 0: phase is a pure function of match-relative time and the season config.
+function phaseAt(t) {
+  if (t < 0) return 'unknown';
+  if (t < AUTO) return 'auto';
+  if (t < AUTO + TELEOP - ENDGAME) return 'teleop';
+  if (t <= AUTO + TELEOP) return 'endgame';
+  return 'unknown';
+}
+
 // +x is toward the BLUE alliance wall, so red robots load near x = -22 and score near x = +15.
 const ROBOTS = [
-  { team: 254, track_id: 7, alliance: 'red', cycle: 8.5, acc: 0.86, lane: -7.5 },
-  { team: 1678, track_id: 3, alliance: 'red', cycle: 10.2, acc: 0.77, lane: 0.0 },
-  { team: 971, track_id: 11, alliance: 'red', cycle: 12.6, acc: 0.61, lane: 7.5 },
-  { team: 118, track_id: 5, alliance: 'blue', cycle: 9.1, acc: 0.81, lane: -4.0 },
-  { team: 148, track_id: 9, alliance: 'blue', cycle: 11.3, acc: 0.7, lane: 3.5 },
-  { team: 2056, track_id: 2, alliance: 'blue', cycle: 13.4, acc: 0.65, lane: 10.5 },
+  { team: 254, track_id: 7, alliance: 'red', cycle: 8.5, acc: 0.86, lane: -7.5, tconf: 0.96 },
+  { team: 1678, track_id: 3, alliance: 'red', cycle: 10.2, acc: 0.77, lane: 0.0, tconf: 0.91 },
+  { team: 971, track_id: 11, alliance: 'red', cycle: 12.6, acc: 0.61, lane: 7.5, tconf: 0.58 },
+  { team: 118, track_id: 5, alliance: 'blue', cycle: 9.1, acc: 0.81, lane: -4.0, tconf: 0.94 },
+  { team: 148, track_id: 9, alliance: 'blue', cycle: 11.3, acc: 0.7, lane: 3.5, tconf: 0.88 },
+  { team: 2056, track_id: 2, alliance: 'blue', cycle: 13.4, acc: 0.65, lane: 10.5, tconf: 0.83 },
 ];
 const UNKNOWN_TRACK = { team: null, track_id: 14, from: 88.0, to: 96.0 };
 
-// narrative beats, so the fixture exercises more than the happy path
+// A broadcast cut to a replay: nobody is observed, on any track.
+const SHOT_CHANGE = { start: 61.2, end: 65.4, reason: 'shot_change' };
+// 971 disappears behind traffic in the scoring zone.
+const OCCLUSION = { team: 971, start: 100.0, end: 103.5, reason: 'occlusion' };
+
 const IMMOBILE = { team: 971, from: 72.4, to: 95.1 };
 const DEFENSE = { team: 2056, from: 40.2, to: 70.6, target: 254 };
-const HOMOGRAPHY_GAP = { from: 100.0, to: 110.0 }; // field_x/field_y null in here
+const HOMOGRAPHY_GAP = { from: 100.0, to: 110.0 }; // field_x/field_y null, still observed
 const FOUL = { team: 148, t: 118.35 };
+
+const inGap = (t, g) => t >= g.start && t <= g.end;
+function gapsFor(team) {
+  const gaps = [{ ...SHOT_CHANGE }];
+  if (team === OCCLUSION.team) {
+    gaps.push({ start: OCCLUSION.start, end: OCCLUSION.end, reason: OCCLUSION.reason });
+  }
+  return gaps.sort((a, b) => a.start - b.start);
+}
+const unobserved = (team, t) => gapsFor(team).some((g) => inGap(t, g));
 
 // ---------------------------------------------------------------- motion
 
-// Each robot shuttles between a loading point near its own wall and a scoring point on
-// the far side. One cycle = travel out, shoot, travel back, reload.
 function buildSchedule(r) {
   const sign = r.alliance === 'red' ? -1 : 1;
   const load = { x: sign * 22.5, y: r.lane * 0.55 };
@@ -91,21 +132,15 @@ function buildSchedule(r) {
     const dwell = c * 0.1;
     const outbound = leg % 2 === 0;
     legs.push({
-      t0: t,
-      t1: t + travel,
-      from: outbound ? load : score,
-      to: outbound ? score : load,
+      t0: t, t1: t + travel,
+      from: outbound ? load : score, to: outbound ? score : load,
       kind: 'travel',
     });
     t += travel;
     const at = outbound ? score : load;
     legs.push({
-      t0: t,
-      t1: t + dwell,
-      from: at,
-      to: at,
-      kind: 'dwell',
-      action: outbound ? 'shoot' : 'reload',
+      t0: t, t1: t + dwell, from: at, to: at,
+      kind: 'dwell', action: outbound ? 'shoot' : 'reload',
     });
     t += dwell;
     leg++;
@@ -128,14 +163,13 @@ function basePos(team, t) {
   return { x: l.from.x + (l.to.x - l.from.x) * u, y: l.from.y + (l.to.y - l.from.y) * u };
 }
 
-// Position with the narrative beats layered on top.
 function pos(team, t) {
   if (team === IMMOBILE.team && t >= IMMOBILE.from && t <= IMMOBILE.to) {
     return basePos(team, IMMOBILE.from);
   }
   if (team === DEFENSE.team && t >= DEFENSE.from && t <= DEFENSE.to) {
     const p = pos(DEFENSE.target, t);
-    return { x: p.x + 3.1, y: p.y + 2.4 }; // shadowing, a bumper-width away
+    return { x: p.x + 3.1, y: p.y + 2.4 };
   }
   return basePos(team, t);
 }
@@ -144,8 +178,8 @@ function unknownPos(t) {
   return { x: -24.5 + u * 6.0, y: 11.6 - u * 1.2 };
 }
 
-// Field space -> normalized image space. Camera sits on the scoring-table side (+y), so
-// larger y is nearer the camera: lower on screen and a slightly larger box.
+// Field space -> normalized image space. Camera on the scoring-table side (+y), so larger y
+// is nearer: lower on screen and a slightly larger box.
 function project(p) {
   const u = 0.5 + (p.x / FIELD_L) * 0.86;
   const v = 0.52 + (p.y / FIELD_W) * 0.62;
@@ -157,40 +191,42 @@ function project(p) {
 
 // ---------------------------------------------------------------- events
 
-const phaseAt = (t) => (t < T_AUTO_END ? 'auto' : t < T_ENDGAME ? 'teleop' : 'endgame');
-const suppressed = (team, t) =>
-  (team === IMMOBILE.team && t >= IMMOBILE.from && t <= IMMOBILE.to) ||
-  (team === DEFENSE.team && t >= DEFENSE.from && t <= DEFENSE.to);
-
 const events = [];
 const byTeam = (n) => ROBOTS.find((r) => r.team === n);
 
 function mk(t, type, team, trackId, conf, opts) {
   const o = opts || {};
-  const p = team == null ? o.pos || null : pos(team, t);
+  const matchLevel = type === 'match_start' || type === 'match_end' || type === 'phase_change';
+  const p = matchLevel || team == null ? o.pos || null : pos(team, t);
   const blind = t >= HOMOGRAPHY_GAP.from && t <= HOMOGRAPHY_GAP.to;
   return {
-    schema_version: 1,
+    schema_version: 2,
     job_id: JOB_ID,
     match_id: MATCH_ID,
-    event_id: '', // assigned after sort
-    team,
-    track_id: trackId,
+    event_id: uuid(),
+    // Match-level events belong to the match, not a robot: team, track_id and field
+    // coordinates are all null.
+    team: matchLevel ? null : team,
+    track_id: matchLevel ? null : trackId,
     t_seconds: r3(t),
     phase: phaseAt(t),
     event_type: type,
     confidence: r2(Math.min(0.99, Math.max(0.05, conf))),
-    field_x: blind || !p ? null : r2(p.x),
-    field_y: blind || !p ? null : r2(p.y),
+    field_x: matchLevel || blind || !p ? null : r2(p.x),
+    field_y: matchLevel || blind || !p ? null : r2(p.y),
     source: o.source || 'model',
   };
 }
 
-// match-level events. No track to attribute them to -- see contracts/OPEN_QUESTIONS.md #1.
 events.push(mk(0.0, 'match_start', null, null, 0.98, { source: 'scoreboard_ocr' }));
-events.push(mk(T_AUTO_END, 'phase_change', null, null, 0.97, { source: 'scoreboard_ocr' }));
-events.push(mk(T_ENDGAME, 'phase_change', null, null, 0.95, { source: 'scoreboard_ocr' }));
+events.push(mk(AUTO, 'phase_change', null, null, 0.97, { source: 'scoreboard_ocr' }));
+events.push(mk(AUTO + TELEOP - ENDGAME, 'phase_change', null, null, 0.95, { source: 'scoreboard_ocr' }));
 events.push(mk(T_MATCH_END, 'match_end', null, null, 0.98, { source: 'scoreboard_ocr' }));
+
+const suppressed = (team, t) =>
+  (team === IMMOBILE.team && t >= IMMOBILE.from && t <= IMMOBILE.to) ||
+  (team === DEFENSE.team && t >= DEFENSE.from && t <= DEFENSE.to) ||
+  unobserved(team, t); // nothing is detected inside a gap
 
 for (const r of ROBOTS) {
   for (const leg of SCHED.get(r.team)) {
@@ -213,60 +249,47 @@ events.push(mk(IMMOBILE.to, 'immobile_end', 971, byTeam(971).track_id, 0.59));
 events.push(mk(DEFENSE.from, 'defense_start', 2056, byTeam(2056).track_id, 0.52));
 events.push(mk(DEFENSE.to, 'defense_end', 2056, byTeam(2056).track_id, 0.47));
 events.push(mk(FOUL.t, 'foul', 148, byTeam(148).track_id, 0.41, { source: 'scoreboard_ocr' }));
-// an unidentified track the model could not resolve to a team
 events.push(
   mk(91.2, 'shot_attempt', null, UNKNOWN_TRACK.track_id, 0.29, { pos: unknownPos(91.2) })
 );
 
 events.sort((a, b) => a.t_seconds - b.t_seconds || a.event_type.localeCompare(b.event_type));
-events.forEach((e, i) => {
-  e.event_id = JOB_ID.slice(0, 8) + '-' + String(i).padStart(4, '0');
-});
 
 // ---------------------------------------------------------------- tracks
 
-function sampleBoxes(fn, from, to) {
+function sampleBoxes(fn, from, to, gaps) {
   const out = [];
   const step = 1 / BOX_HZ;
   for (let i = 0; ; i++) {
     const t = from + i * step;
     if (t > to + 1e-9) break;
+    // No observation inside a gap, which is exactly why gaps must be declared.
+    if (gaps.some((g) => inGap(t, g))) continue;
     const b = project(fn(t));
     out.push({ t: r3(t), x: r3(b.x), y: r3(b.y), w: r3(b.w), h: r3(b.h) });
   }
   return out;
 }
+
 const tracks = ROBOTS.map((r) => ({
-  schema_version: 1,
+  schema_version: 2,
   track_id: r.track_id,
   team: r.team,
   alliance: r.alliance,
-  boxes: sampleBoxes((t) => pos(r.team, t), 0, DURATION),
+  team_confidence: r.tconf,
+  boxes: sampleBoxes((t) => pos(r.team, t), 0, DURATION, gapsFor(r.team)),
+  gaps: gapsFor(r.team),
 }));
 tracks.push({
-  schema_version: 1,
+  schema_version: 2,
   track_id: UNKNOWN_TRACK.track_id,
   team: null,
   alliance: null,
-  boxes: sampleBoxes(unknownPos, UNKNOWN_TRACK.from, UNKNOWN_TRACK.to),
+  team_confidence: null,
+  boxes: sampleBoxes(unknownPos, UNKNOWN_TRACK.from, UNKNOWN_TRACK.to, []),
+  gaps: [],
 });
 tracks.sort((a, b) => a.track_id - b.track_id);
-
-// ---------------------------------------------------------------- score
-
-const PTS = SEASON.scoring.shot_made;
-const recon = { red: 0, blue: 0 };
-for (const e of events) {
-  if (e.event_type === 'shot_made' && e.team != null) {
-    recon[byTeam(e.team).alliance] += PTS[e.phase] || 0;
-  }
-  if (e.event_type === 'foul' && e.team != null) {
-    const other = byTeam(e.team).alliance === 'red' ? 'blue' : 'red';
-    recon[other] += SEASON.scoring.foul_points_to_opponent;
-  }
-}
-// TBA is ground truth and will not match exactly -- that gap is the accuracy indicator.
-const TBA = { red: recon.red + 7, blue: recon.blue - 4 };
 
 // ---------------------------------------------------------------- write
 
@@ -275,41 +298,61 @@ const jsonl = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
 const json = (o) => JSON.stringify(o, null, 2) + '\n';
 const teamsOf = (a) => ROBOTS.filter((r) => r.alliance === a).map((r) => r.team);
 
+// Doc 0's Contract A example score. Score reconstruction is NOT meaningful yet -- the season
+// point values are zero placeholders, so reconstructed_score is null rather than invented.
+const TBA = { red: 91, blue: 84 };
+
 writeFileSync(
   resolve(OUT, 'job.json'),
   json({
-    schema_version: 1,
+    schema_version: 2,
     job_id: JOB_ID,
     match_id: MATCH_ID,
+    season: SEASON_YEAR,
     video_id: VIDEO_ID,
-    local_path: '/data/segments/' + VIDEO_ID + '_00120_00272.mp4',
+    local_path: `/data/segments/${VIDEO_ID}_00120_00272.mp4`,
     start_offset: START_OFFSET,
     duration: DURATION,
     fps: FPS,
     width: W,
     height: H,
     status: 'complete',
+    stage: null,
+    progress: null,
+    error_code: null,
+    error: null,
+    attempt: 1,
+    created_at: '2026-08-28T14:20:00Z',
+    updated_at: '2026-08-28T14:26:04Z',
     alliances: { red: teamsOf('red'), blue: teamsOf('blue') },
     tba_score: TBA,
   })
 );
 writeFileSync(resolve(OUT, 'events.jsonl'), jsonl(events));
 writeFileSync(resolve(OUT, 'tracks.jsonl'), jsonl(tracks));
+
+const framesTotal = Math.round(DURATION * FPS);
+const framesSkipped = Math.round((SHOT_CHANGE.end - SHOT_CHANGE.start) * FPS);
 writeFileSync(
   resolve(OUT, 'result.json'),
   json({
-    schema_version: 1,
+    schema_version: 2,
+    job_id: JOB_ID,
+    model_version: 'fixture-synthetic-0.2.0',
     box_sample_rate: BOX_HZ,
     homography_ok: true,
-    reconstructed_score: recon,
-    frames_analyzed: Math.round(DURATION * FPS) - 118,
-    frames_skipped_shot_change: 118,
-    model_version: 'fixture-synthetic-0.1.0',
+    frames_total: framesTotal,
+    frames_analyzed: framesTotal - framesSkipped,
+    frames_skipped_shot_change: framesSkipped,
+    tracks_emitted: tracks.length,
+    events_emitted: events.length,
+    // Null while the season's point values are placeholders.
+    reconstructed_score: null,
+    started_at: '2026-08-28T14:22:31Z',
+    finished_at: '2026-08-28T14:26:04Z',
   })
 );
 
-// Snapshot of the TBA response, with frcNNN keys intact: this is the boundary where
-// component 2 strips the prefix, and the fixture should show the raw form.
 writeFileSync(
   resolve(OUT, 'tba_match.json'),
   json({
@@ -320,18 +363,8 @@ writeFileSync(
     event_key: '2026casf',
     winning_alliance: TBA.red > TBA.blue ? 'red' : 'blue',
     alliances: {
-      red: {
-        score: TBA.red,
-        team_keys: teamsOf('red').map((t) => 'frc' + t),
-        surrogate_team_keys: [],
-        dq_team_keys: [],
-      },
-      blue: {
-        score: TBA.blue,
-        team_keys: teamsOf('blue').map((t) => 'frc' + t),
-        surrogate_team_keys: [],
-        dq_team_keys: [],
-      },
+      red: { score: TBA.red, team_keys: teamsOf('red').map((t) => 'frc' + t), surrogate_team_keys: [], dq_team_keys: [] },
+      blue: { score: TBA.blue, team_keys: teamsOf('blue').map((t) => 'frc' + t), surrogate_team_keys: [], dq_team_keys: [] },
     },
     time: 1774028400,
     actual_time: 1774028733,
@@ -342,50 +375,161 @@ writeFileSync(
   })
 );
 
-// Corrections layer. Not one of the five artifacts doc 0 lists, but component 3 cannot
-// demonstrate the corrections view without one. See fixtures/README.md.
+// Contract F. Includes a TRACK-scoped correction, which doc 3 now says is the primary path:
+// one bad OCR read mislabels forty-odd events and every box on that robot.
 const lowConf = events.find((e) => e.team === null && e.event_type === 'shot_attempt');
 const falsePos = events.find((e) => e.event_type === 'shot_made' && e.confidence < 0.55);
 writeFileSync(
   resolve(OUT, 'corrections.jsonl'),
   jsonl([
     {
-      correction_id: '9a1c0e42-1f3b-4d55-9c8a-2b7e5f0a1d33',
-      event_id: lowConf.event_id,
+      schema_version: 2,
+      correction_id: uuid(),
+      scope: 'track',
+      job_id: JOB_ID,
+      target_id: String(byTeam(971).track_id),
       action: 'edit',
-      fields: { team: 971, track_id: byTeam(971).track_id },
-      created_at: '2026-08-28T14:22:00Z',
+      fields: { team: 971 },
+      created_at: '2026-08-28T14:31:00Z',
+      created_by: 'justin',
     },
     {
-      correction_id: 'c47d1b90-6e28-4a71-83f0-5d9a2c4e6b11',
-      event_id: falsePos.event_id,
+      schema_version: 2,
+      correction_id: uuid(),
+      scope: 'event',
+      job_id: JOB_ID,
+      target_id: lowConf.event_id,
+      action: 'edit',
+      fields: { team: 971 },
+      created_at: '2026-08-28T14:32:10Z',
+      created_by: 'justin',
+    },
+    {
+      schema_version: 2,
+      correction_id: uuid(),
+      scope: 'event',
+      job_id: JOB_ID,
+      target_id: falsePos.event_id,
       action: 'delete',
       fields: null,
-      created_at: '2026-08-28T14:23:12Z',
-    },
-    {
-      correction_id: 'e02f7a35-8c14-49d6-b7a2-0f3e8d1c9a44',
-      event_id: JOB_ID.slice(0, 8) + '-m001',
-      action: 'create',
-      fields: {
-        team: 1678,
-        track_id: byTeam(1678).track_id,
-        t_seconds: 63.5,
-        phase: 'teleop',
-        event_type: 'shot_made',
-        confidence: 1.0,
-        field_x: null,
-        field_y: null,
-        source: 'manual',
-      },
-      created_at: '2026-08-28T14:25:47Z',
+      created_at: '2026-08-28T14:33:12Z',
+      created_by: 'justin',
     },
   ])
 );
 
+// ---- awkward case: a match TBA has no data for (alliances and tba_score both null)
+
+const NO_TBA = resolve(FIXTURES, '2026casf_qm43_no_tba');
+mkdirSync(NO_TBA, { recursive: true });
+const NO_TBA_JOB = '4b7c2e19-3d5a-4f81-9c06-8e1b2a7d5f30';
+const NO_TBA_MATCH = '2026casf_qm43';
+writeFileSync(
+  resolve(NO_TBA, 'job.json'),
+  json({
+    schema_version: 2,
+    job_id: NO_TBA_JOB,
+    match_id: NO_TBA_MATCH,
+    season: SEASON_YEAR,
+    video_id: 'kJQP7kiw5Fk',
+    local_path: `/data/segments/kJQP7kiw5Fk_00000_00152.mp4`,
+    start_offset: 0.0,
+    duration: 152.0,
+    fps: 30.0,
+    width: 640,
+    height: 360,
+    status: 'complete',
+    stage: null,
+    progress: null,
+    error_code: null,
+    error: null,
+    attempt: 1,
+    created_at: '2026-08-28T15:02:00Z',
+    updated_at: '2026-08-28T15:07:44Z',
+    // TBA has nothing for this match. The job is still valid; component 1 falls back to raw
+    // OCR without elimination, so tracks stay unidentified.
+    alliances: null,
+    tba_score: null,
+  })
+);
+const noTbaTracks = [1, 4].map((id, i) => ({
+  schema_version: 2,
+  track_id: id,
+  team: null,
+  alliance: i === 0 ? 'red' : 'blue',
+  team_confidence: null,
+  boxes: sampleBoxes((t) => pos(i === 0 ? 254 : 118, t), 0, 40, []),
+  gaps: [],
+}));
+const noTbaEvents = [
+  {
+    schema_version: 2, job_id: NO_TBA_JOB, match_id: NO_TBA_MATCH, event_id: uuid(),
+    team: null, track_id: null, t_seconds: 0.0, phase: 'auto', event_type: 'match_start',
+    confidence: 0.96, field_x: null, field_y: null, source: 'scoreboard_ocr',
+  },
+  {
+    schema_version: 2, job_id: NO_TBA_JOB, match_id: NO_TBA_MATCH, event_id: uuid(),
+    team: null, track_id: 1, t_seconds: 12.4, phase: 'auto', event_type: 'shot_made',
+    confidence: 0.55, field_x: -8.2, field_y: 1.4, source: 'model',
+  },
+];
+writeFileSync(resolve(NO_TBA, 'events.jsonl'), jsonl(noTbaEvents));
+writeFileSync(resolve(NO_TBA, 'tracks.jsonl'), jsonl(noTbaTracks));
+writeFileSync(
+  resolve(NO_TBA, 'result.json'),
+  json({
+    schema_version: 2,
+    job_id: NO_TBA_JOB,
+    model_version: 'fixture-synthetic-0.2.0',
+    box_sample_rate: BOX_HZ,
+    homography_ok: true,
+    frames_total: 4560,
+    frames_analyzed: 4560,
+    frames_skipped_shot_change: 0,
+    tracks_emitted: noTbaTracks.length,
+    events_emitted: noTbaEvents.length,
+    reconstructed_score: null,
+    started_at: '2026-08-28T15:03:10Z',
+    finished_at: '2026-08-28T15:07:44Z',
+  })
+);
+
+// ---- awkward case: a failed job carrying an error_code
+
+const FAILED = resolve(FIXTURES, 'failed_download');
+mkdirSync(FAILED, { recursive: true });
+writeFileSync(
+  resolve(FAILED, 'job.json'),
+  json({
+    schema_version: 2,
+    job_id: 'b3f0a71c-9d24-4e6a-8c15-0f7b2e9d4a83',
+    match_id: '2026casf_qm44',
+    season: SEASON_YEAR,
+    video_id: 'M7lc1UVf-VE',
+    local_path: null,
+    start_offset: 0.0,
+    duration: null,
+    fps: null,
+    width: null,
+    height: null,
+    status: 'failed',
+    stage: null,
+    progress: null,
+    // rate_limited is worth retrying; video_unavailable is not. That distinction is the
+    // whole reason error_code is a closed enum.
+    error_code: 'rate_limited',
+    error: 'yt-dlp: HTTP Error 429: Too Many Requests (backing off)',
+    attempt: 2,
+    created_at: '2026-08-28T15:40:00Z',
+    updated_at: '2026-08-28T15:41:12Z',
+    alliances: null,
+    tba_score: null,
+  })
+);
+
 console.log(
-  'events=' + events.length + ' tracks=' + tracks.length +
-  ' recon=' + JSON.stringify(recon) + ' tba=' + JSON.stringify(TBA)
+  `events=${events.length} tracks=${tracks.length} gaps=${tracks.reduce((n, t) => n + t.gaps.length, 0)} ` +
+  `+ no_tba fixture + failed_download fixture`
 );
 
 // ---------------------------------------------------------------- video
@@ -395,7 +539,6 @@ if (process.argv.includes('--no-video')) {
   process.exit(0);
 }
 
-// 3x5 bitmap digits, so a human can check that the overlay label matches the bumper.
 const GLYPHS = {
   0: [7, 5, 5, 5, 7], 1: [2, 6, 2, 2, 7], 2: [7, 1, 7, 4, 7], 3: [7, 1, 7, 1, 7],
   4: [5, 5, 7, 1, 1], 5: [7, 4, 7, 1, 7], 6: [7, 4, 7, 5, 7], 7: [7, 1, 1, 1, 1],
@@ -433,8 +576,16 @@ function digits(text, x0, y0, scale, r, g, b) {
 }
 
 function drawFrame(t) {
-  rect(0, 0, W, H, 26, 29, 36); // carpet
-  // field carpet band + alliance zone tints, drawn in image space via project()
+  // Inside the shot-change window the broadcast has cut away, so the field is not on screen.
+  // This is what makes the gap real rather than asserted.
+  if (t >= SHOT_CHANGE.start && t <= SHOT_CHANGE.end) {
+    rect(0, 0, W, H, 12, 12, 16);
+    digits('0', W / 2 - 40, H / 2 - 20, 4, 70, 70, 80);
+    digits(String(Math.round(t)), W / 2 + 8, H / 2 - 20, 4, 70, 70, 80);
+    return;
+  }
+
+  rect(0, 0, W, H, 26, 29, 36);
   const topLeft = project({ x: -FIELD_L / 2, y: -FIELD_W / 2 });
   const botRight = project({ x: FIELD_L / 2, y: FIELD_W / 2 });
   const fx0 = topLeft.x * W;
@@ -442,16 +593,19 @@ function drawFrame(t) {
   const fx1 = botRight.x * W;
   const fy1 = botRight.y * H;
   rect(fx0, fy0, fx1 - fx0, fy1 - fy0, 38, 42, 52);
-  rect(fx0, fy0, (fx1 - fx0) * 0.16, fy1 - fy0, 62, 32, 38); // red end
-  rect(fx1 - (fx1 - fx0) * 0.16, fy0, (fx1 - fx0) * 0.16, fy1 - fy0, 32, 44, 68); // blue end
-  rect((fx0 + fx1) / 2 - 1, fy0, 2, fy1 - fy0, 70, 76, 90); // center line
+  rect(fx0, fy0, (fx1 - fx0) * 0.16, fy1 - fy0, 62, 32, 38);
+  rect(fx1 - (fx1 - fx0) * 0.16, fy0, (fx1 - fx0) * 0.16, fy1 - fy0, 32, 44, 68);
+  rect((fx0 + fx1) / 2 - 1, fy0, 2, fy1 - fy0, 70, 76, 90);
 
   const drawn = [];
-  for (const r of ROBOTS) drawn.push({ b: project(pos(r.team, t)), team: r.team, alliance: r.alliance });
+  for (const r of ROBOTS) {
+    if (unobserved(r.team, t)) continue;
+    drawn.push({ b: project(pos(r.team, t)), team: r.team, alliance: r.alliance });
+  }
   if (t >= UNKNOWN_TRACK.from && t <= UNKNOWN_TRACK.to) {
     drawn.push({ b: project(unknownPos(t)), team: null, alliance: null });
   }
-  drawn.sort((a, b) => a.b.y - b.b.y); // painter's algorithm: nearer robots last
+  drawn.sort((a, b) => a.b.y - b.b.y);
   for (const d of drawn) {
     const x = d.b.x * W;
     const y = d.b.y * H;
@@ -459,7 +613,7 @@ function drawFrame(t) {
     const h = d.b.h * H;
     const col = d.alliance === 'red' ? [196, 54, 62] : d.alliance === 'blue' ? [48, 104, 200] : [120, 124, 134];
     rect(x, y, w, h, col[0], col[1], col[2]);
-    rect(x + 2, y + 2, w - 4, h - 4, 24, 26, 32); // chassis inside the bumpers
+    rect(x + 2, y + 2, w - 4, h - 4, 24, 26, 32);
     if (d.team != null) {
       const s = Math.max(1, Math.round(w / 16));
       const label = String(d.team);

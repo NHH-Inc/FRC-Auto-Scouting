@@ -8,6 +8,7 @@ broken one at the browser.
 import json
 import os
 import uuid
+from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from . import database, downloader, models, orchestrator, stats
-from .corrections import apply_corrections
+from .corrections import apply_corrections, apply_track_corrections
 from .serializers import (
     JOB_STATUSES,
     correction_to_dict,
@@ -30,8 +31,33 @@ app = FastAPI(title="FRC Auto-Scouting Ingest Service")
 
 @app.exception_handler(HTTPException)
 async def contract_http_error(_request: Request, exc: HTTPException):
-    """Contract E errors are ``{"error": "message"}``, not FastAPI's ``detail`` shape."""
-    return JSONResponse(status_code=exc.status_code, content={"error": str(exc.detail)})
+    """Contract E errors are ``{"error_code": "...", "error": "message"}``.
+
+    FastAPI's default ``detail`` shape is not what component 3 parses.
+    """
+    code = getattr(exc, "error_code", None) or (
+        "internal" if exc.status_code >= 500 else None
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error_code": code, "error": str(exc.detail)},
+    )
+
+
+def _classify(exc: Exception) -> str:
+    """Map a failure onto the closed error_code set so the UI knows whether to offer retry."""
+    text = str(exc).lower()
+    if "429" in text or "rate" in text and "limit" in text:
+        return "rate_limited"
+    if "unavailable" in text or "private" in text or "removed" in text or "404" in text:
+        return "video_unavailable"
+    if "timed out" in text or "timeout" in text:
+        return "timeout"
+    if "analysis exited" in text or "did not write" in text:
+        return "analysis_failed"
+    if "yt-dlp" in text or "download" in text or "403" in text:
+        return "download_failed"
+    return "internal"
 
 # The web dev server runs on 5173 (doc 0 default). Vite proxies /api in dev, but a build
 # served from anywhere else talks to this directly.
@@ -45,6 +71,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+DEFAULT_SEASON = int(os.environ.get("FRC_DEFAULT_SEASON", "2026"))
 
 database.init_db()
 
@@ -90,6 +118,8 @@ async def create_job(
     url = payload.get("url")
     # match_id is optional per Contract E. Absent means "resolve it for me".
     match_id = payload.get("match_id")
+    # Optional per Contract E; component 2 defaults it. Selects the season config.
+    season = payload.get("season") or DEFAULT_SEASON
 
     if not url:
         raise HTTPException(status_code=400, detail="URL is required")
@@ -112,7 +142,9 @@ async def create_job(
         # cannot". The string "unknown" is not a valid TBA key and would collide across every
         # unresolved job's events.
         match_id=match_id,
+        season=int(season),
         status="queued",
+        attempt=1,
         start_offset=start_offset,
         duration=duration,
         fps=info.get("fps"),
@@ -131,7 +163,9 @@ async def create_job(
 @app.get("/api/jobs")
 def list_jobs(db: Session = Depends(get_db)):
     jobs = db.query(models.Job).order_by(models.Job.created_at.desc()).all()
-    return [job_to_dict(job) for job in jobs]
+    # Doc 0: "Collection endpoints return an object, never a bare array." That is what let
+    # box_sample_rate land on the tracks response without a breaking change.
+    return {"jobs": [job_to_dict(job) for job in jobs]}
 
 
 @app.get("/api/jobs/{job_id}")
@@ -175,8 +209,12 @@ async def retry_job(
         raise HTTPException(status_code=404, detail="Job not found")
     job.status = "queued"
     job.error = None
+    job.error_code = None
     job.progress = None
     job.stage = None
+    # Doc 0: retry reuses the job id and increments attempt -- a new job would orphan the
+    # failed one's history, which is exactly what you want when a venue keeps failing.
+    job.attempt = (job.attempt or 1) + 1
     db.commit()
     db.refresh(job)
     retry_url = f"https://www.youtube.com/watch?v={job.video_id}"
@@ -199,7 +237,7 @@ def process_job(job_id: str, url: str):
         db.commit()
 
     try:
-        set_status("downloading", stage="yt-dlp", progress=0.0)
+        set_status("downloading", stage="downloading", progress=0.0)
 
         info = video_downloader.get_video_info(url)
         start_offset, duration, full_video = _media_window(url, info)
@@ -246,7 +284,7 @@ def process_job(job_id: str, url: str):
             stage=None,
         )
 
-        set_status("analyzing", stage="starting", progress=0.0)
+        set_status("analyzing", stage="detecting", progress=0.0)
 
         job_data = job_to_dict(job)
         job_data.pop("error", None)
@@ -268,7 +306,13 @@ def process_job(job_id: str, url: str):
     except Exception as exc:
         # Doc 2: "treat a failed download as an expected condition, not a crash." Keep the
         # reason -- a retry the user cannot reason about is not much of a retry path.
-        set_status("failed", error=str(exc)[:1000], progress=None, stage=None)
+        set_status(
+            "failed",
+            error=str(exc)[:1000],
+            error_code=_classify(exc),
+            progress=None,
+            stage=None,
+        )
     finally:
         db.close()
 
@@ -320,13 +364,32 @@ def import_results(db: Session, job, results: dict):
                     track_id=data["track_id"],
                     team=data.get("team"),
                     alliance=data.get("alliance"),
+                    team_confidence=data.get("team_confidence"),
                     boxes=data.get("boxes") or [],
+                    # Required by Contract C. Never interpolate across one.
+                    gaps=data.get("gaps") or [],
                 )
             )
     db.commit()
 
 
 # ---------------------------------------------------------------- match data
+
+
+def _corrections_for(db: Session, match_id: str):
+    """Every correction affecting a match: event-scoped by match, track-scoped by job."""
+    job_ids = [
+        j.job_id for j in db.query(models.Job).filter(models.Job.match_id == match_id).all()
+    ]
+    return (
+        db.query(models.Correction)
+        .filter(
+            (models.Correction.match_id == match_id)
+            | (models.Correction.job_id.in_(job_ids) if job_ids else False)
+        )
+        .order_by(models.Correction.created_at)
+        .all()
+    )
 
 
 def _events_for(db: Session, match_id: str, min_confidence: float, raw: bool) -> list[dict]:
@@ -340,12 +403,7 @@ def _events_for(db: Session, match_id: str, min_confidence: float, raw: bool) ->
         # Uncorrected model output: what the accuracy comparison and training export need.
         events = [event_to_dict(e) for e in rows]
     else:
-        corrections = (
-            db.query(models.Correction)
-            .filter(models.Correction.match_id == match_id)
-            .all()
-        )
-        events = apply_corrections(rows, corrections)
+        events = apply_corrections(rows, _corrections_for(db, match_id))
     return [e for e in events if (e.get("confidence") or 0.0) >= min_confidence]
 
 
@@ -356,13 +414,60 @@ def get_match_events(
     raw: bool = Query(False, description="Return uncorrected model output."),
     db: Session = Depends(get_db),
 ):
-    return _events_for(db, match_id, min_confidence, raw)
+    return {"events": _events_for(db, match_id, min_confidence, raw)}
 
 
 @app.get("/api/matches/{match_id}/tracks")
-def get_match_tracks(match_id: str, db: Session = Depends(get_db)):
+def get_match_tracks(
+    match_id: str,
+    raw: bool = Query(False, description="Return uncorrected track attribution."),
+    db: Session = Depends(get_db),
+):
     rows = db.query(models.Track).filter(models.Track.match_id == match_id).all()
-    return [track_to_dict(t) for t in rows]
+    tracks = (
+        [track_to_dict(t) for t in rows]
+        if raw
+        else apply_track_corrections(rows, _corrections_for(db, match_id))
+    )
+    # Contract C: the sample rate is stated in result.json and served here, so component 3
+    # knows how much to interpolate instead of inferring it from sample spacing.
+    job = db.query(models.Job).filter(models.Job.match_id == match_id).first()
+    return {"box_sample_rate": _box_sample_rate(job), "tracks": tracks}
+
+
+def _result_path(job) -> Path | None:
+    if job is None:
+        return None
+    path = Path(analysis_orchestrator.output_base_dir) / job.job_id / "result.json"
+    return path if path.exists() else None
+
+
+def _read_result(job) -> dict | None:
+    path = _result_path(job)
+    if path is None:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _box_sample_rate(job) -> float:
+    result = _read_result(job)
+    return float(result.get("box_sample_rate", 0.0)) if result else 0.0
+
+
+@app.get("/api/jobs/{job_id}/result")
+def get_job_result(job_id: str, db: Session = Depends(get_db)):
+    """Contract D's result.json, so component 3 can reach box_sample_rate and frame counts."""
+    job = db.query(models.Job).filter(models.Job.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    result = _read_result(job)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No analysis result for that job yet")
+    return result
 
 
 @app.get("/api/matches/{match_id}/corrections")
@@ -372,13 +477,7 @@ def get_match_corrections(match_id: str, db: Session = Depends(get_db)):
     Without it a client has to fetch raw and corrected and diff them to find out which rows a
     human touched, which costs an extra request and still loses created_at.
     """
-    rows = (
-        db.query(models.Correction)
-        .filter(models.Correction.match_id == match_id)
-        .order_by(models.Correction.created_at)
-        .all()
-    )
-    return [correction_to_dict(c) for c in rows]
+    return {"corrections": [correction_to_dict(c) for c in _corrections_for(db, match_id)]}
 
 
 @app.get("/api/matches/{match_id}/accuracy")
@@ -394,7 +493,8 @@ def get_match_accuracy(match_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="No job for that match")
 
     events = _events_for(db, match_id, 0.0, raw=True)
-    reconstructed = stats.reconstruct_score(events, job.alliances)
+    cfg = stats.season_config(job.season)
+    reconstructed = stats.reconstruct_score(events, job.alliances, cfg)
     tba = job.tba_score
     delta = (
         {"red": reconstructed["red"] - tba["red"], "blue": reconstructed["blue"] - tba["blue"]}
@@ -403,6 +503,9 @@ def get_match_accuracy(match_id: str, db: Session = Depends(get_db)):
     )
     return {
         "match_id": match_id,
+        # Contract A already allows alliances/tba_score to be null, and the UI needs to
+        # tell "TBA had nothing" apart from "the score matched".
+        "tba_available": tba is not None,
         "reconstructed": reconstructed,
         "tba": tba,
         "delta": delta,
@@ -431,19 +534,24 @@ def create_manual_event(event_data: dict, db: Session = Depends(get_db)):
     if problems:
         raise HTTPException(status_code=400, detail="; ".join(problems))
 
-    event_id = f"manual-{uuid.uuid4().hex[:12]}"
-    fields = {**payload, "event_id": event_id, "schema_version": 1}
+    # event_id is a UUIDv4 per doc 0's identifier table.
+    event_id = str(uuid.uuid4())
+    fields = {**payload, "event_id": event_id, "schema_version": 2}
+    correction_id = str(uuid.uuid4())
 
     db.add(
         models.Correction(
-            event_id=event_id,
+            correction_id=correction_id,
+            scope="event",
+            job_id=payload.get("job_id"),
+            target_id=event_id,
             match_id=match_id,
             action="create",
             fields=fields,
         )
     )
     db.commit()
-    return fields
+    return {**fields, "corrected": True, "correction_id": correction_id}
 
 
 @app.patch("/api/events/{event_id}")
@@ -460,7 +568,7 @@ def update_event(event_id: str, updates: dict, db: Session = Depends(get_db)):
     # The target may be a manually created event, which lives only in the corrections layer.
     origin = (
         db.query(models.Correction)
-        .filter(models.Correction.event_id == event_id)
+        .filter(models.Correction.target_id == event_id)
         .first()
     )
     if not event and not origin:
@@ -473,7 +581,9 @@ def update_event(event_id: str, updates: dict, db: Session = Depends(get_db)):
     match_id = event.match_id if event else (origin.match_id if origin else None)
     db.add(
         models.Correction(
-            event_id=event_id,
+            scope="event",
+            job_id=event.job_id if event else (origin.job_id if origin else None),
+            target_id=event_id,
             match_id=match_id,
             action="edit",
             fields=updates,
@@ -494,7 +604,7 @@ def delete_event(event_id: str, db: Session = Depends(get_db)):
     event = db.query(models.Event).filter(models.Event.event_id == event_id).first()
     origin = (
         db.query(models.Correction)
-        .filter(models.Correction.event_id == event_id)
+        .filter(models.Correction.target_id == event_id)
         .first()
     )
     if not event and not origin:
@@ -502,7 +612,9 @@ def delete_event(event_id: str, db: Session = Depends(get_db)):
 
     db.add(
         models.Correction(
-            event_id=event_id,
+            scope="event",
+            job_id=event.job_id if event else origin.job_id,
+            target_id=event_id,
             match_id=event.match_id if event else origin.match_id,
             action="delete",
             fields=None,
@@ -512,26 +624,87 @@ def delete_event(event_id: str, db: Session = Depends(get_db)):
     return None
 
 
+@app.patch("/api/jobs/{job_id}/tracks/{track_id}")
+def patch_track(job_id: str, track_id: int, updates: dict, db: Session = Depends(get_db)):
+    """Re-attribute a whole track, and every event on it, as one action.
+
+    Doc 3: "The most common correction is a misread bumper, and it is a track-level fix, not
+    an event-level one. One bad OCR read mislabels forty-odd events and every box on that
+    robot." Scoped by job because track_id is job-local -- there is no global track address.
+    """
+    track = (
+        db.query(models.Track)
+        .filter(models.Track.job_id == job_id, models.Track.track_id == track_id)
+        .first()
+    )
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found on that job")
+
+    team = updates.get("team")
+    if team is not None and not isinstance(team, int):
+        raise HTTPException(status_code=400, detail="team must be an integer or null")
+
+    correction_id = str(uuid.uuid4())
+    db.add(
+        models.Correction(
+            correction_id=correction_id,
+            scope="track",
+            job_id=job_id,
+            target_id=str(track_id),
+            match_id=track.match_id,
+            action="edit",
+            fields={"team": team},
+            created_by=updates.get("created_by"),
+        )
+    )
+    db.commit()
+    rows = db.query(models.Track).filter(models.Track.match_id == track.match_id).all()
+    corrected = apply_track_corrections(rows, _corrections_for(db, track.match_id))
+    return next((t for t in corrected if t["track_id"] == track_id), None)
+
+
+@app.delete("/api/corrections/{correction_id}", status_code=204)
+def delete_correction(correction_id: str, db: Session = Depends(get_db)):
+    """Undo. Doc 0: "Deleting a correction undoes it." Raw output was never touched."""
+    row = (
+        db.query(models.Correction)
+        .filter(models.Correction.correction_id == correction_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Correction not found")
+    db.delete(row)
+    db.commit()
+    return None
+
+
 # ---------------------------------------------------------------- stats and export
 
 
 @app.get("/api/teams/{team}/stats")
-def get_team_stats(team: int, event_key: str | None = None, db: Session = Depends(get_db)):
+def get_team_stats(
+    team: int,
+    event_key: str | None = None,
+    min_confidence: float = 0.0,
+    db: Session = Depends(get_db),
+):
     """Aggregates, computed per request. Doc 0: never stored, only queried."""
     jobs_query = db.query(models.Job).filter(models.Job.match_id.isnot(None))
     if event_key:
         jobs_query = jobs_query.filter(models.Job.match_id.like(f"{event_key}_%"))
-    match_ids = [job.match_id for job in jobs_query.all()]
+    jobs = jobs_query.all()
 
     events: list[dict] = []
     played = 0
-    for match_id in match_ids:
-        rows = _events_for(db, match_id, 0.0, raw=False)
+    cfg = None
+    for job in jobs:
+        rows = _events_for(db, job.match_id, min_confidence, raw=False)
         if any(e.get("team") == team for e in rows):
             played += 1
         events.extend(rows)
+        cfg = cfg or stats.season_config(job.season)
 
-    return stats.team_stats(team, events, event_key, played)
+    return stats.team_stats(team, events, cfg, event_key, played, min_confidence)
 
 
 @app.post("/api/export/sheets")
@@ -564,7 +737,7 @@ def export_to_sheets(payload: dict, db: Session = Depends(get_db)):
             else ""
         ),
         "rows_written": rows,
-        "rows_updated": 0,
+        "rows_skipped": 0,
         "mode": mode,
     }
 

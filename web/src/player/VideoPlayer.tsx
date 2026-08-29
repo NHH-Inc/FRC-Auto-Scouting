@@ -3,7 +3,7 @@ import type { PlayableJob, Track } from '../contracts';
 import type { ViewEvent } from '../lib/corrections';
 import { EVENT_LABEL, fmtClock, fmtTime, youtubeUrlAt } from '../lib/format';
 import { visibleBoxes } from '../lib/tracks';
-import { PHASE_BOUNDS } from '../season';
+import { phaseBounds, type SeasonConfig } from '../season';
 
 // requestVideoFrameCallback is what makes the overlay frame-accurate instead of merely
 // close. lib.dom declares it, but not every browser implements it (Firefox), so it is
@@ -24,6 +24,7 @@ const LOW_CONF = '#e8b93b';
 
 export interface VideoPlayerProps {
   job: PlayableJob;
+  season: SeasonConfig;
   src: string;
   tracks: Track[];
   events: ViewEvent[];
@@ -39,6 +40,7 @@ export interface VideoPlayerProps {
 
 export function VideoPlayer({
   job,
+  season,
   src,
   tracks,
   events,
@@ -66,6 +68,7 @@ export function VideoPlayer({
   drawState.current = { tracks, events, confidenceThreshold, showBoxes, boxSampleRate };
 
   const duration = job.duration;
+  const PHASE_BOUNDS = phaseBounds(season);
 
   useEffect(() => {
     setReady(false);

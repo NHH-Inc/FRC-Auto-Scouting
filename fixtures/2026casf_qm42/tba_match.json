@@ -7,7 +7,7 @@
   "winning_alliance": "red",
   "alliances": {
     "red": {
-      "score": 90,
+      "score": 91,
       "team_keys": [
         "frc254",
         "frc1678",
@@ -17,7 +17,7 @@
       "dq_team_keys": []
     },
     "blue": {
-      "score": 60,
+      "score": 84,
       "team_keys": [
         "frc118",
         "frc148",

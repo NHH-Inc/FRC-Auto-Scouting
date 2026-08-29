@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "job_id": "b3f0a71c-9d24-4e6a-8c15-0f7b2e9d4a83",
+  "match_id": "2026casf_qm44",
+  "season": 2026,
+  "video_id": "M7lc1UVf-VE",
+  "local_path": null,
+  "start_offset": 0,
+  "duration": null,
+  "fps": null,
+  "width": null,
+  "height": null,
+  "status": "failed",
+  "stage": null,
+  "progress": null,
+  "error_code": "rate_limited",
+  "error": "yt-dlp: HTTP Error 429: Too Many Requests (backing off)",
+  "attempt": 2,
+  "created_at": "2026-08-28T15:40:00Z",
+  "updated_at": "2026-08-28T15:41:12Z",
+  "alliances": null,
+  "tba_score": null
+}

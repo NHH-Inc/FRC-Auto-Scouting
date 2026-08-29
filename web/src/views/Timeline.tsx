@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import type { PlayableJob } from '../contracts';
+import { phaseBounds, type SeasonConfig } from '../season';
 import type { ViewEvent } from '../lib/corrections';
 import { EVENT_LABEL, fmtTime } from '../lib/format';
-import { PHASE_BOUNDS } from '../season';
 
 // Doc 3: "Per-match timeline of events for all six robots."
 //
@@ -15,6 +15,7 @@ const PAD = 10;
 
 export interface TimelineProps {
   job: PlayableJob;
+  season: SeasonConfig;
   events: ViewEvent[];
   confidenceThreshold: number;
   currentTime: number;
@@ -25,6 +26,7 @@ export interface TimelineProps {
 
 export function Timeline({
   job,
+  season,
   events,
   confidenceThreshold,
   currentTime,
@@ -44,6 +46,8 @@ export function Timeline({
     }
     return rows;
   }, [job.alliances, events]);
+
+  const PHASE_BOUNDS = phaseBounds(season);
 
   const width = 900;
   const plotW = width - LABEL_W - PAD * 2;
@@ -124,13 +128,11 @@ export function Timeline({
                   const cx = xOf(e.tSeconds);
                   const cy = y + ROW_H / 2;
                   const on = e.eventId === selectedEventId;
-                  const cls = `tl-mark ${e.eventType} ${low ? 'low' : ''} ${on ? 'on' : ''} ${
-                    e.correctionState ? 'corrected' : ''
-                  }`;
+                  const cls = `tl-mark ${e.eventType} ${low ? 'low' : ''} ${on ? 'on' : ''} ${e.corrected ? 'corrected' : ''}`;
                   const title = (
                     <title>
                       {`${EVENT_LABEL[e.eventType]} · ${fmtTime(e.tSeconds)} · conf ${e.confidence.toFixed(2)}${
-                        e.correctionState ? ` · ${e.correctionState}` : ''
+                        e.corrected ? ' · corrected' : ''
                       }`}
                     </title>
                   );

@@ -1,14 +1,12 @@
-"""Aggregates and score reconstruction.
+"""Aggregates and score reconstruction, SCHEMA_VERSION 2.
 
 Doc 0: "Aggregates are never stored, only queried. If a stat is needed often enough to hurt,
-add a materialized view, not a column." Everything here is computed on demand from event
-rows; nothing is written back.
+add a materialized view, not a column." Everything here is computed on demand from event rows.
 
-Cycle time is measured acquire-to-acquire, between consecutive `reload` events for a team.
-Doc 1 defines it as reload-to-score instead; the two produce materially different numbers
-and the disagreement is logged as contracts/OPEN_QUESTIONS.md #11. Reload-to-reload is used
-here because a missed shot should still cost a cycle, and because it is measured per team
-rather than per track -- track ids are job-local and a re-identified robot gets a new one.
+Cycle time is doc 0's vocabulary definition: the interval between one `reload` and the next
+`reload` for the same TEAM. Acquire to acquire, so a missed shot still costs a cycle. Per team
+rather than per track, because track ids are job-local and a re-identified robot may span
+several. An unterminated final cycle is discarded, not counted.
 """
 
 import json
@@ -16,17 +14,42 @@ import statistics
 from functools import lru_cache
 from pathlib import Path
 
-SEASON_PATH = Path(__file__).resolve().parent.parent / "contracts" / "season_2026.json"
+SEASONS_DIR = Path(__file__).resolve().parent.parent / "contracts" / "seasons"
 
 
-@lru_cache(maxsize=1)
-def season_config() -> dict:
-    with open(SEASON_PATH, "r", encoding="utf-8") as handle:
+@lru_cache(maxsize=8)
+def season_config(year: int) -> dict | None:
+    """Doc 0: selected by the job's `season`, so old footage stays analyzable.
+
+    Returns None for an unknown season rather than falling back to a current one -- doc 0:
+    "Anything unrecognized is a bug, not a fallback."
+    """
+    path = SEASONS_DIR / f"{year}.json"
+    if not path.exists():
+        return None
+    with open(path, "r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
-def points_for(phase: str) -> int:
-    return int(season_config()["scoring"]["shot_made"].get(phase, 0))
+def points_for(phase: str, cfg: dict | None) -> int:
+    """Points for one made shot in a phase.
+
+    `shot_made` does not say which goal it went in -- event_type is a closed set with no goal
+    field, so that would be a contract change. Until then this reads `shot_made_high`. Every
+    value is a zero placeholder anyway; doc 0: "Do not invent values to make a test pass."
+    """
+    if not cfg:
+        return 0
+    group = cfg.get("point_values", {}).get(phase) or {}
+    return int(group.get("shot_made_high", 0))
+
+
+def scoring_is_meaningful(cfg: dict | None) -> bool:
+    """False while every point value is still a zero placeholder."""
+    if not cfg:
+        return False
+    groups = cfg.get("point_values", {}).values()
+    return any(v for group in groups for v in (group or {}).values())
 
 
 def _alliance_of(team, alliances) -> str | None:
@@ -39,28 +62,25 @@ def _alliance_of(team, alliances) -> str | None:
     return None
 
 
-def reconstruct_score(events: list[dict], alliances: dict | None) -> dict:
-    """Sum made shots and fouls into an alliance score.
+def reconstruct_score(events: list[dict], alliances: dict | None, cfg: dict | None) -> dict:
+    """Sum made shots into an alliance score.
 
     An event with team=None contributes nothing: an unidentified robot cannot be credited to
-    an alliance, and guessing would quietly inflate the accuracy number this exists to test.
+    an alliance, and guessing would quietly inflate the number this exists to test.
     """
     score = {"red": 0, "blue": 0}
     if not alliances:
         return score
-    foul_points = int(season_config()["scoring"]["foul_points_to_opponent"])
     for event in events:
         side = _alliance_of(event.get("team"), alliances)
         if side is None:
             continue
         if event.get("event_type") == "shot_made":
-            score[side] += points_for(event.get("phase", "unknown"))
-        elif event.get("event_type") == "foul":
-            score["blue" if side == "red" else "red"] += foul_points
+            score[side] += points_for(event.get("phase", "unknown"), cfg)
     return score
 
 
-def _paired_seconds(events: list[dict], start_type: str, end_type: str, match_end: float) -> float:
+def _paired_seconds(events, start_type: str, end_type: str, match_end: float) -> float:
     """Total seconds spanned by start/end pairs; an unclosed interval runs to match_end."""
     total = 0.0
     opened_at = None
@@ -75,38 +95,53 @@ def _paired_seconds(events: list[dict], start_type: str, end_type: str, match_en
     return total
 
 
-def team_stats(team: int, events: list[dict], event_key: str | None, matches_played: int) -> dict:
-    periods = season_config()["periods"]
-    match_end = float(periods["auto_seconds"]) + float(periods["teleop_seconds"])
+def team_stats(
+    team: int,
+    events: list[dict],
+    cfg: dict | None,
+    event_key: str | None,
+    matches_played: int,
+    min_confidence: float = 0.0,
+    low_confidence_threshold: float = 0.5,
+) -> dict:
+    """Contract E's team_stats shape. Fields may be added additively; none renamed."""
+    if cfg:
+        match_end = float(cfg["auto_seconds"]) + float(cfg["teleop_seconds"])
+    else:
+        match_end = float("inf")
 
     mine = [e for e in events if e.get("team") == team]
+
     reload_times = sorted(
         (e.get("t_seconds") or 0.0) for e in mine if e.get("event_type") == "reload"
     )
-    cycles = [
-        reload_times[i] - reload_times[i - 1] for i in range(1, len(reload_times))
-    ]
+    cycles = [reload_times[i] - reload_times[i - 1] for i in range(1, len(reload_times))]
+
+    shot_times = sorted(
+        (e.get("t_seconds") or 0.0) for e in mine if e.get("event_type") == "shot_attempt"
+    )
+    intervals = [shot_times[i] - shot_times[i - 1] for i in range(1, len(shot_times))]
 
     attempts = sum(1 for e in mine if e.get("event_type") == "shot_attempt")
     made = sum(1 for e in mine if e.get("event_type") == "shot_made")
-    points = sum(
-        points_for(e.get("phase", "unknown")) for e in mine if e.get("event_type") == "shot_made"
-    )
 
     return {
         "team": team,
         "event_key": event_key,
+        "min_confidence": min_confidence,
         "matches_played": matches_played,
+        "cycles": len(cycles),
+        # Median, not mean: one immobile robot produces a single enormous interval.
+        "avg_cycle_seconds": statistics.median(cycles) if cycles else None,
         "shot_attempts": attempts,
         "shots_made": made,
-        "accuracy": (made / attempts) if attempts else None,
+        "shot_accuracy": (made / attempts) if attempts else None,
+        "avg_shot_interval_seconds": statistics.fmean(intervals) if intervals else None,
         "reloads": len(reload_times),
-        "cycle_count": len(cycles),
-        # Median, not mean: one immobile robot produces a single enormous interval.
-        "median_cycle_seconds": statistics.median(cycles) if cycles else None,
-        "best_cycle_seconds": min(cycles) if cycles else None,
         "defense_seconds": _paired_seconds(mine, "defense_start", "defense_end", match_end),
         "immobile_seconds": _paired_seconds(mine, "immobile_start", "immobile_end", match_end),
         "fouls": sum(1 for e in mine if e.get("event_type") == "foul"),
-        "points_contributed": points,
+        "low_confidence_events": sum(
+            1 for e in mine if (e.get("confidence") or 0.0) < low_confidence_threshold
+        ),
     }

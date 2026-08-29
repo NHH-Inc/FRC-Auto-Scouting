@@ -80,7 +80,7 @@ export function ExportPanel({ matchIds }: ExportPanelProps) {
           <p>
             Wrote <strong>{result.rowsWritten}</strong>{' '}
             {result.rowsWritten === 1 ? 'row' : 'rows'}
-            {result.rowsUpdated > 0 && <> · updated {result.rowsUpdated} existing</>} in{' '}
+            {result.rowsSkipped > 0 && <> · skipped {result.rowsSkipped} already present</>} in{' '}
             {result.mode} mode.
           </p>
           <a href={result.spreadsheetUrl} target="_blank" rel="noreferrer">

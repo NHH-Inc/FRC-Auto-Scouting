@@ -1,0 +1,15 @@
+{
+  "season": 2025,
+  "field_length_ft": 57.0,
+  "field_width_ft": 26.6,
+  "auto_seconds": 15,
+  "teleop_seconds": 135,
+  "endgame_seconds": 30,
+  "game_pieces": ["coral", "algae"],
+  "goals": ["l1", "l2", "l3", "l4", "processor", "net"],
+  "point_values": {
+    "auto":    { "shot_made_high": 0, "shot_made_low": 0 },
+    "teleop":  { "shot_made_high": 0, "shot_made_low": 0 },
+    "endgame": {}
+  }
+}

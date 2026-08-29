@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { EVENT_TYPES, type EventType, type Job, type ScoutEvent } from '../contracts';
+import { EVENT_TYPES, type EventType, type Job, type ScoutEvent, type Track } from '../contracts';
 import type { ViewEvent } from '../lib/corrections';
 import { EVENT_LABEL, PHASE_LABEL, SOURCE_LABEL, fmtTime } from '../lib/format';
 
@@ -21,7 +21,9 @@ export interface EventInspectorProps {
   onSeek: (t: number) => void;
   onPatch: (eventId: string, fields: Partial<ScoutEvent>) => Promise<void>;
   onDelete: (eventId: string) => Promise<void>;
-  onCreate: (event: Omit<ScoutEvent, 'eventId'>) => Promise<void>;
+  onCreate: (event: Omit<ScoutEvent, 'eventId' | 'corrected' | 'correctionId'>) => Promise<void>;
+  tracks: Track[];
+  onPatchTrack: (trackId: number, team: number | null) => Promise<void>;
 }
 
 export function EventInspector(props: EventInspectorProps) {
@@ -38,6 +40,8 @@ export function EventInspector(props: EventInspectorProps) {
     onPatch,
     onDelete,
     onCreate,
+    tracks,
+    onPatchTrack,
   } = props;
 
   const [teamFilter, setTeamFilter] = useState<number | 'all' | 'none'>('all');
@@ -55,7 +59,7 @@ export function EventInspector(props: EventInspectorProps) {
     () =>
       events.filter((e) => {
         if (onlyLow && e.confidence >= confidenceThreshold) return false;
-        if (onlyCorrected && !e.correctionState) return false;
+        if (onlyCorrected && !e.corrected) return false;
         if (typeFilter !== 'all' && e.eventType !== typeFilter) return false;
         if (teamFilter === 'none' && e.team != null) return false;
         if (typeof teamFilter === 'number' && e.team !== teamFilter) return false;
@@ -84,6 +88,13 @@ export function EventInspector(props: EventInspectorProps) {
           {shown.length} of {events.length} · {lowCount} below threshold
         </span>
       </div>
+
+      <TrackPanel
+        tracks={tracks}
+        teams={allTeams}
+        busy={busy}
+        onPatchTrack={(id, team) => run(() => onPatchTrack(id, team))}
+      />
 
       {/* Doc 3: "Surface it, and let users filter the view by threshold." */}
       <div className="filters">
@@ -213,9 +224,7 @@ function EventRow({
   return (
     <button
       type="button"
-      className={`event-row ${low ? 'low' : ''} ${selected ? 'sel' : ''} ${
-        e.correctionState ?? ''
-      }`}
+      className={`event-row ${low ? 'low' : ''} ${selected ? 'sel' : ''} ${e.corrected ? 'corrected' : ''}`}
       onClick={onClick}
     >
       <span className="t">{fmtTime(e.tSeconds)}</span>
@@ -228,8 +237,8 @@ function EventRow({
         <span className="conf-bar" style={{ width: `${e.confidence * 100}%` }} />
         <span className="conf-num">{e.confidence.toFixed(2)}</span>
       </span>
-      {e.correctionState && <span className={`tag ${e.correctionState}`}>{e.correctionState}</span>}
-      {e.source !== 'model' && !e.correctionState && (
+      {e.corrected && <span className="tag edited">corrected</span>}
+      {e.source !== 'model' && !e.corrected && (
         <span className="tag src">{SOURCE_LABEL[e.source]}</span>
       )}
     </button>
@@ -261,7 +270,7 @@ function EditPanel({
         <code className="muted">{e.eventId}</code>
       </div>
 
-      {e.correctionState === 'edited' && e.original && (
+      {e.original && (
         <p className="note was">
           Model originally said:{' '}
           <strong>{e.original.team ?? 'unattributed'}</strong> ·{' '}
@@ -320,8 +329,8 @@ function EditPanel({
       </div>
 
       <p className="note warn-note">
-        Team attribution really belongs to the track, not one event — correcting it here fixes
-        this row only, and the overlay box keeps the old label. See OPEN_QUESTIONS.md #10.
+        This edits one row. A misread bumper is a track-level problem — use “Re-attribute
+        track” above to fix the track and every event on it in one action.
       </p>
     </div>
   );
@@ -338,7 +347,7 @@ function AddEventRow({
   currentTime: number;
   teams: number[];
   busy: boolean;
-  onCreate: (e: Omit<ScoutEvent, 'eventId'>) => void;
+  onCreate: (e: Omit<ScoutEvent, 'eventId' | 'corrected' | 'correctionId'>) => void;
 }) {
   const [team, setTeam] = useState<number | ''>(teams[0] ?? '');
   const [type, setType] = useState<EventType>('shot_made');
@@ -381,5 +390,75 @@ function AddEventRow({
         Add
       </button>
     </div>
+  );
+}
+
+
+/**
+ * Doc 3: "The most common correction is a misread bumper, and it is a track-level fix, not an
+ * event-level one. One bad OCR read mislabels forty-odd events and every box on that robot...
+ * Build that path first; per-event editing is the exception."
+ *
+ * team_confidence is what makes this actionable: it says how sure the OCR was about the whole
+ * track, so the tracks most likely to be wrong sort to the top.
+ */
+function TrackPanel({
+  tracks,
+  teams,
+  busy,
+  onPatchTrack,
+}: {
+  tracks: Track[];
+  teams: number[];
+  busy: boolean;
+  onPatchTrack: (trackId: number, team: number | null) => void;
+}) {
+  const ordered = [...tracks].sort(
+    (a, b) => (a.teamConfidence ?? -1) - (b.teamConfidence ?? -1)
+  );
+  if (ordered.length === 0) return null;
+
+  return (
+    <details className="track-panel" open>
+      <summary>
+        Re-attribute track <span className="muted">{ordered.length} tracked robots</span>
+      </summary>
+      <p className="note">
+        Fixes the track and every event on it in one action. Least-confident identifications
+        first — those are the ones worth checking.
+      </p>
+      <div className="track-rows">
+        {ordered.map((t) => {
+          const shaky = t.teamConfidence != null && t.teamConfidence < 0.75;
+          return (
+            <div key={t.trackId} className={`track-row ${shaky ? 'shaky' : ''}`}>
+              <span className={`chip ${t.alliance ?? ''}`}>
+                {t.team ?? `track ${t.trackId}`}
+              </span>
+              <span className="muted tconf">
+                {t.teamConfidence != null ? `id ${t.teamConfidence.toFixed(2)}` : 'unidentified'}
+              </span>
+              {t.gaps.length > 0 && (
+                <span className="muted" title={t.gaps.map((g) => g.reason).join(', ')}>
+                  {t.gaps.length} gap{t.gaps.length === 1 ? '' : 's'}
+                </span>
+              )}
+              <select
+                disabled={busy}
+                value={t.team ?? ''}
+                onChange={(e) =>
+                  onPatchTrack(t.trackId, e.target.value ? Number(e.target.value) : null)
+                }
+              >
+                <option value="">unattributed</option>
+                {teams.map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+          );
+        })}
+      </div>
+    </details>
   );
 }

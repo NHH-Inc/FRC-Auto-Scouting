@@ -18,10 +18,12 @@ class Job(Base):
     __tablename__ = "jobs"
 
     job_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    schema_version = Column(Integer, default=1, nullable=False)
+    schema_version = Column(Integer, default=2, nullable=False)
     # Nullable on purpose: Contract E says an unresolved match comes back as null. Never the
     # string "unknown" -- that is not a valid TBA key and every unresolved job would collide.
     match_id = Column(String, nullable=True, index=True)
+    # Selects /contracts/seasons/<year>.json, so old footage stays analyzable.
+    season = Column(Integer, nullable=False, default=2026)
     video_id = Column(String(11), nullable=False)
     local_path = Column(String, nullable=True)
     start_offset = Column(Float, default=0.0, nullable=False)
@@ -37,11 +39,16 @@ class Job(Base):
     # Doc 2 treats a failed download as an expected condition, and doc 3 wants a retry path.
     # A retry the user cannot reason about is not much of a path, so keep the reason.
     error = Column(String, nullable=True)
+    # Closed enum so the UI knows whether a retry is worth offering:
+    # rate_limited is, video_unavailable is not.
+    error_code = Column(String, nullable=True)
+    attempt = Column(Integer, nullable=False, default=1)
     # Contract D has component 1 stream progress so "component 2 can show a progress bar" --
     # but component 3 is what draws it, so it has to survive to the job record.
     progress = Column(Float, nullable=True)
     stage = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class Event(Base):
@@ -55,7 +62,7 @@ class Event(Base):
     __tablename__ = "events"
 
     event_id = Column(String, primary_key=True)
-    schema_version = Column(Integer, default=1, nullable=False)
+    schema_version = Column(Integer, default=2, nullable=False)
     job_id = Column(String, ForeignKey("jobs.job_id"), index=True)
     match_id = Column(String, index=True)
     team = Column(Integer, nullable=True)
@@ -87,18 +94,32 @@ class Track(Base):
     track_id = Column(Integer, nullable=False)
     team = Column(Integer, nullable=True)
     alliance = Column(String, nullable=True)
+    # How sure bumper OCR is about the WHOLE track, separate from event confidence.
+    team_confidence = Column(Float, nullable=True)
     boxes = Column(JSON, nullable=False)
+    # Required by Contract C, possibly empty. Consumers must not interpolate across one.
+    gaps = Column(JSON, nullable=False, default=list)
 
 
 class Correction(Base):
-    """A correction references an event; it never replaces one."""
+    """Contract F. A correction references what it changes; it never replaces it.
+
+    scope='event'  -> target_id is an event_id.
+    scope='track'  -> target_id is a track_id and job_id is required, because track ids are
+                      job-local and there is no global track address. A track-scoped
+                      correction re-attributes the track AND every event on it, as one action.
+    """
 
     __tablename__ = "corrections"
 
     correction_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    event_id = Column(String, index=True, nullable=False)
+    schema_version = Column(Integer, default=2, nullable=False)
+    scope = Column(String, nullable=False, default="event")  # event | track
+    job_id = Column(String, index=True, nullable=True)
+    target_id = Column(String, index=True, nullable=False)
     # Denormalised so corrections for a match can be fetched without joining every event.
     match_id = Column(String, index=True, nullable=True)
     action = Column(String, nullable=False)  # edit | delete | create
     fields = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_by = Column(String, nullable=True)

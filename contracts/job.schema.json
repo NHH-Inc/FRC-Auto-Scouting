@@ -1,49 +1,32 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://frc-video-scouting/contracts/job.schema.json",
-  "title": "Job record (Contract A)",
-  "description": "Produced by component 2 (ingest). Consumed by components 1 (analysis) and 3 (web).",
+  "title": "Job record (Contract A, v2)",
+  "description": "Produced by component 2. Consumed by components 1 and 3.",
   "type": "object",
   "additionalProperties": true,
   "required": [
-    "schema_version",
-    "job_id",
-    "match_id",
-    "video_id",
-    "start_offset",
-    "status"
+    "schema_version", "job_id", "match_id", "season", "video_id", "local_path",
+    "start_offset", "duration", "fps", "width", "height", "status", "stage",
+    "progress", "error_code", "error", "attempt", "created_at", "updated_at",
+    "alliances", "tba_score"
   ],
   "properties": {
-    "schema_version": { "type": "integer", "const": 1 },
-    "job_id": {
-      "type": "string",
-      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-      "description": "UUIDv4."
-    },
+    "schema_version": { "type": "integer", "const": 2 },
+    "job_id": { "type": "string", "format": "uuid" },
     "match_id": {
       "type": ["string", "null"],
       "pattern": "^[0-9]{4}[a-z0-9]+_[a-z0-9]+$",
-      "description": "TBA match key, lowercase. NULL -- not the string 'unknown' -- when component 2 could not resolve it from video metadata. Contract E: 'returns the job with match_id: null if it cannot'."
+      "description": "TBA match key, lowercase. Null when resolution from video metadata fails."
     },
-    "video_id": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9_-]{11}$",
-      "description": "YouTube ID, 11 chars, case-sensitive."
+    "season": {
+      "type": "integer",
+      "description": "Selects /contracts/seasons/<year>.json, so old footage stays analyzable after the game changes."
     },
-    "local_path": {
-      "type": ["string", "null"],
-      "description": "Path to the downloaded segment. Null until status reaches 'downloaded'."
-    },
-    "start_offset": {
-      "type": "number",
-      "minimum": 0,
-      "description": "Seconds. Position of the segment start within the original video. Add to t_seconds to get original-video time. 0 when the segment is the whole video."
-    },
-    "duration": {
-      "type": ["number", "null"],
-      "exclusiveMinimum": 0,
-      "description": "Segment duration in seconds. Null until the download reports it."
-    },
+    "video_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{11}$" },
+    "local_path": { "type": ["string", "null"] },
+    "start_offset": { "type": "number", "minimum": 0 },
+    "duration": { "type": ["number", "null"], "exclusiveMinimum": 0 },
     "fps": { "type": ["number", "null"], "exclusiveMinimum": 0 },
     "width": { "type": ["integer", "null"], "exclusiveMinimum": 0 },
     "height": { "type": ["integer", "null"], "exclusiveMinimum": 0 },
@@ -51,8 +34,21 @@
       "type": "string",
       "enum": ["queued", "downloading", "downloaded", "analyzing", "complete", "failed"]
     },
+    "stage": {
+      "type": ["string", "null"],
+      "enum": ["downloading", "decoding", "detecting", "tracking", "ocr", "events", null]
+    },
+    "progress": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "error_code": {
+      "type": ["string", "null"],
+      "enum": ["video_unavailable", "download_failed", "rate_limited", "no_match_data",
+               "analysis_failed", "timeout", "internal", null]
+    },
+    "error": { "type": ["string", "null"] },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
     "alliances": {
-      "description": "From TBA. Narrows bumper OCR to three candidates per side. Null when TBA has no data for the match; component 1 then falls back to raw OCR without elimination.",
       "oneOf": [
         { "type": "null" },
         {
@@ -60,18 +56,8 @@
           "additionalProperties": false,
           "required": ["red", "blue"],
           "properties": {
-            "red": {
-              "type": "array",
-              "items": { "type": "integer", "exclusiveMinimum": 0 },
-              "minItems": 3,
-              "maxItems": 3
-            },
-            "blue": {
-              "type": "array",
-              "items": { "type": "integer", "exclusiveMinimum": 0 },
-              "minItems": 3,
-              "maxItems": 3
-            }
+            "red":  { "type": "array", "items": { "type": "integer", "exclusiveMinimum": 0 }, "minItems": 3, "maxItems": 3 },
+            "blue": { "type": "array", "items": { "type": "integer", "exclusiveMinimum": 0 }, "minItems": 3, "maxItems": 3 }
           }
         }
       ]
@@ -83,37 +69,15 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["red", "blue"],
-          "properties": {
-            "red": { "type": "integer" },
-            "blue": { "type": "integer" }
-          }
+          "properties": { "red": { "type": "integer" }, "blue": { "type": "integer" } }
         }
       ]
-    },
-    "error": {
-      "type": ["string", "null"],
-      "description": "Human-readable failure reason. Required non-null when status is 'failed' -- doc 2 treats a failed download as an expected condition, and the queue cannot offer a useful retry without saying what went wrong."
-    },
-    "progress": {
-      "type": ["number", "null"],
-      "minimum": 0,
-      "maximum": 1,
-      "description": "Not in doc 0. Proposed: see OPEN_QUESTIONS.md #4. Component 3 reads it if present and falls back to an indeterminate bar."
-    },
-    "stage": { "type": ["string", "null"], "description": "Proposed alongside progress." },
-    "created_at": {
-      "type": ["string", "null"],
-      "format": "date-time",
-      "description": "ISO 8601, UTC, Z suffix. Proposed: the queue cannot order by age without it."
     }
   },
   "allOf": [
     {
-      "$comment": "Media metadata is unknowable before the download completes, but must be present once it has -- component 1 cannot decode without fps/width/height and component 3 cannot lay out a player without duration.",
-      "if": {
-        "properties": { "status": { "enum": ["downloaded", "analyzing", "complete"] } },
-        "required": ["status"]
-      },
+      "$comment": "Doc 0: media metadata must be non-null once status is downloaded/analyzing/complete.",
+      "if": { "properties": { "status": { "enum": ["downloaded", "analyzing", "complete"] } }, "required": ["status"] },
       "then": {
         "properties": {
           "local_path": { "type": "string" },
@@ -121,13 +85,22 @@
           "fps": { "type": "number" },
           "width": { "type": "integer" },
           "height": { "type": "integer" }
-        },
-        "required": ["local_path", "duration", "fps", "width", "height"]
+        }
       }
     },
     {
+      "$comment": "Doc 0: error_code and error must be non-null when status is failed.",
       "if": { "properties": { "status": { "const": "failed" } }, "required": ["status"] },
-      "then": { "properties": { "error": { "type": "string" } }, "required": ["error"] }
+      "then": {
+        "properties": {
+          "error_code": {
+            "type": "string",
+            "enum": ["video_unavailable", "download_failed", "rate_limited", "no_match_data",
+                     "analysis_failed", "timeout", "internal"]
+          },
+          "error": { "type": "string" }
+        }
+      }
     }
   ]
 }

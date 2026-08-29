@@ -1,0 +1,15 @@
+{
+  "season": 2026,
+  "field_length_ft": 54.0,
+  "field_width_ft": 26.6,
+  "auto_seconds": 15,
+  "teleop_seconds": 135,
+  "endgame_seconds": 20,
+  "game_pieces": ["ball"],
+  "goals": ["high", "low"],
+  "point_values": {
+    "auto":    { "shot_made_high": 0, "shot_made_low": 0 },
+    "teleop":  { "shot_made_high": 0, "shot_made_low": 0 },
+    "endgame": {}
+  }
+}

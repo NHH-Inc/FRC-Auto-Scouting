@@ -1,29 +1,51 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://frc-video-scouting/contracts/tracks.schema.json",
-  "title": "Track record (Contract C)",
-  "description": "Produced by component 1 alongside events. This is what draws the boxes. Written to tracks.jsonl, one object per track. Transcribed from doc 0 Contract C -- no fields added.",
+  "title": "Track record (Contract C, v2)",
+  "description": "Produced by component 1 alongside events. This is what draws the boxes. One object per track in tracks.jsonl.",
   "type": "object",
   "additionalProperties": true,
-  "required": ["schema_version", "track_id", "team", "alliance", "boxes"],
+  "required": ["schema_version", "track_id", "team", "alliance", "team_confidence", "boxes", "gaps"],
   "properties": {
-    "schema_version": { "type": "integer", "const": 1 },
+    "schema_version": { "type": "integer", "const": 2 },
     "track_id": { "type": "integer", "description": "Unique within a job only." },
     "team": { "type": ["integer", "null"], "exclusiveMinimum": 0 },
     "alliance": { "type": ["string", "null"], "enum": ["red", "blue", null] },
+    "team_confidence": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "How sure bumper OCR is about the WHOLE track's identity. Separate from per-event confidence; this is what flags a likely misattribution."
+    },
     "boxes": {
       "type": "array",
-      "description": "Sample rate need not match video frame rate. Component 3 interpolates between samples; the rate is stated in result.json as box_sample_rate.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["t", "x", "y", "w", "h"],
         "properties": {
-          "t": { "type": "number", "minimum": 0, "description": "Seconds from segment start." },
-          "x": { "type": "number", "description": "Top-left corner, normalized image space 0..1." },
-          "y": { "type": "number", "description": "Top-left corner, normalized image space 0..1." },
+          "t": { "type": "number", "minimum": 0 },
+          "x": { "type": "number" },
+          "y": { "type": "number" },
           "w": { "type": "number", "exclusiveMinimum": 0 },
           "h": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "description": "REQUIRED, possibly empty. Intervals where the robot was not observed. Consumers must not interpolate across a listed gap -- without this a four-second hole is indistinguishable from a low sample rate, and the overlay draws a robot gliding through footage nobody analyzed. Tracks are NOT split at gaps: re-identification exists to stitch fragments into one logical track.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["start", "end", "reason"],
+        "properties": {
+          "start": { "type": "number", "minimum": 0 },
+          "end": { "type": "number", "minimum": 0 },
+          "reason": {
+            "type": "string",
+            "enum": ["shot_change", "occlusion", "out_of_frame", "detection_lost"]
+          }
         }
       }
     }

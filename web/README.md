@@ -1,4 +1,4 @@
-# /web — component 3
+# /web — component 3 (SCHEMA_VERSION 2)
 
 UI, player, overlay, corrections, Sheets export. TypeScript + React + Vite.
 
@@ -55,10 +55,11 @@ analysis process to finish. It includes frame and one-second stepping, speed, vo
 fullscreen, local seeking through HTTP byte ranges, and a readable codec/load error state.
 
 Boxes are interpolated between track samples — the fixture samples at 5 Hz against 30 fps
-video, so five frames in six are interpolated. Interpolation **stops** across gaps longer
-than three sample periods, because doc 1 has the backend skip broadcast shot changes and
-Contract C has no way to mark the resulting hole; smoothly gliding a robot through footage
-nobody analyzed would be fabricated data. See `contracts/OPEN_QUESTIONS.md` #8.
+video, so five frames in six are interpolated. Interpolation **stops** inside a declared gap
+(Contract C's `gaps` array): a skipped shot-change segment is a hole where nothing was
+observed, and gliding a robot through footage nobody analyzed would be fabricated data
+rendered at the same confidence as real data. v1 guessed at this with a sample-spacing
+threshold; v2 gets it as a fact from the pipeline.
 
 Keyboard: `space` play/pause, `←`/`→` frame step, `shift+←`/`→` one second, `b` toggle boxes.
 
@@ -72,10 +73,8 @@ the view is composed in `src/lib/corrections.ts`. The accuracy panel deliberatel
 
 `contracts/OPEN_QUESTIONS.md` has all thirteen. The ones that shape this code most:
 
-- **#2** No endpoint exposes `box_sample_rate`, so it is inferred from median sample spacing.
-- **#3** No endpoint lists corrections, so correction state is recovered by diffing raw
-  against corrected — two requests where one would do.
-- **#5** No retry endpoint, so retry re-POSTs from the stored `video_id`. The user never
-  re-pastes, but a new `job_id` is minted.
-- **#10** Team attribution belongs to a track, but only events can be patched. The inspector
-  says so inline rather than pretending the fix is complete.
+All thirteen are resolved in SCHEMA_VERSION 2 and the workarounds are gone: `box_sample_rate`
+arrives on the tracks response, `corrected`/`correction_id` arrive on each event, retry reuses
+the job id, and team attribution is fixed at the track level via
+`PATCH /api/jobs/:job_id/tracks/:track_id` — which doc 3 now says to build first, so the
+inspector leads with it and treats per-event editing as the exception.

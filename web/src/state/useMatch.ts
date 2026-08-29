@@ -1,24 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getApi } from '../api';
 import type { Accuracy } from '../api/shapes';
-import type { ContractViolation, ScoutEvent, Track } from '../contracts';
-import {
-  applyCorrections,
-  deriveCorrectionState,
-  deletedEvents,
-  type ViewEvent,
-} from '../lib/corrections';
-import { estimateSampleRate } from '../lib/tracks';
+import type { ContractViolation, Correction, ScoutEvent, Track } from '../contracts';
+import { deletedEvents, toViewEvents, type ViewEvent } from '../lib/corrections';
 
 export interface MatchData {
   /** Uncorrected model output. The accuracy comparison and any training export use this. */
   raw: ScoutEvent[];
-  /** Raw with the corrections layer applied -- what the UI shows by default. */
+  /** Corrected view, paired against raw so the inspector can show the original. */
   events: ViewEvent[];
   /** Raw events a human deleted. Kept so the inspector can offer to undo. */
   deleted: ScoutEvent[];
   tracks: Track[];
+  corrections: Correction[];
   accuracy: Accuracy | null;
+  /** Contract C, served on the tracks response in v2 rather than inferred. */
   boxSampleRate: number;
   loading: boolean;
   error: string | null;
@@ -30,8 +26,9 @@ const EMPTY: MatchData = {
   events: [],
   deleted: [],
   tracks: [],
+  corrections: [],
   accuracy: null,
-  boxSampleRate: 5,
+  boxSampleRate: 0,
   loading: true,
   error: null,
   violations: [],
@@ -41,9 +38,9 @@ const EMPTY: MatchData = {
  * Everything the analysis view needs for one match.
  *
  * Fetches raw and corrected separately: doc 0 keeps corrections as their own layer, and the
- * UI wants both -- corrected to display, raw to diff against so it can mark which rows a
- * human touched. When component 2 grows a corrections endpoint (OPEN_QUESTIONS.md #3) the
- * diff path here can go away.
+ * UI wants both -- corrected to display, raw so the inspector can show what the model
+ * originally said. Which rows a human touched now comes from the API's `corrected` flag, not
+ * from a client-side diff.
  */
 export function useMatch(matchId: string | null, ready = true) {
   const [data, setData] = useState<MatchData>(EMPTY);
@@ -56,38 +53,35 @@ export function useMatch(matchId: string | null, ready = true) {
     setData((d) => ({ ...d, loading: true, error: null }));
     try {
       const api = await getApi();
-      const [rawRes, corrRes, tracksRes, corrections] = await Promise.all([
+      const [rawRes, corrRes, tracksRes, correctionsRes] = await Promise.all([
         api.getEvents(matchId, { raw: true }),
         api.getEvents(matchId),
         api.getTracks(matchId),
         api.getCorrections(matchId),
       ]);
 
-      // Prefer real correction records when the API can give them; fall back to diffing.
-      const events = corrections
-        ? applyCorrections(rawRes.data, corrections.data)
-        : deriveCorrectionState(rawRes.data, corrRes.data);
-
       let accuracy: Accuracy | null = null;
       try {
         accuracy = await api.getAccuracy(matchId);
       } catch {
-        // Accuracy needs a TBA score; a match without one is not an error worth blocking on.
+        // A match with no TBA data is not an error worth blocking the view on.
       }
 
       setData({
         raw: rawRes.data,
-        events,
-        deleted: deletedEvents(rawRes.data, events),
-        tracks: tracksRes.data,
+        events: toViewEvents(corrRes.data, rawRes.data),
+        deleted: deletedEvents(rawRes.data, corrRes.data),
+        tracks: tracksRes.data.tracks,
+        corrections: correctionsRes.data,
         accuracy,
-        boxSampleRate: estimateSampleRate(tracksRes.data),
+        boxSampleRate: tracksRes.data.boxSampleRate,
         loading: false,
         error: null,
         violations: [
           ...rawRes.violations,
           ...corrRes.violations,
           ...tracksRes.violations,
+          ...correctionsRes.violations,
         ],
       });
     } catch (e) {
@@ -118,7 +112,7 @@ export function useMatch(matchId: string | null, ready = true) {
   );
 
   const addEvent = useCallback(
-    async (event: Omit<ScoutEvent, 'eventId'>) => {
+    async (event: Omit<ScoutEvent, 'eventId' | 'corrected' | 'correctionId'>) => {
       const api = await getApi();
       await api.createEvent(event);
       await load();
@@ -126,5 +120,24 @@ export function useMatch(matchId: string | null, ready = true) {
     [load]
   );
 
-  return { ...data, reload: load, patchEvent, removeEvent, addEvent };
+  /** Doc 3's primary correction path: re-attributes the track and every event on it. */
+  const patchTrack = useCallback(
+    async (jobId: string, trackId: number, team: number | null) => {
+      const api = await getApi();
+      await api.patchTrack(jobId, trackId, { team });
+      await load();
+    },
+    [load]
+  );
+
+  const undoCorrection = useCallback(
+    async (correctionId: string) => {
+      const api = await getApi();
+      await api.deleteCorrection(correctionId);
+      await load();
+    },
+    [load]
+  );
+
+  return { ...data, reload: load, patchEvent, removeEvent, addEvent, patchTrack, undoCorrection };
 }

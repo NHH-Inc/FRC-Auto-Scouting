@@ -6,15 +6,15 @@ the other two.
 
 | File | Contract | Status |
 |---|---|---|
-| `SCHEMA_VERSION` | — | `1` |
+| `SCHEMA_VERSION` | — | `2` |
 | `enums.md` | closed sets, identifiers, units | transcribed from doc 0 |
-| `job.schema.json` | A — job record | transcribed from doc 0, one conditional added |
-| `events.schema.json` | B — event record | transcribed from doc 0, one open question |
-| `tracks.schema.json` | C — track record | transcribed from doc 0 |
-| `correction.schema.json` | corrections layer | transcribed from doc 0 |
-| `result.schema.json` | D — `result.json` metadata | **key names proposed, not agreed** |
-| `season_2026.json` | field dimensions, periods, scoring | **location proposed, not agreed** |
-| `OPEN_QUESTIONS.md` | — | thirteen items needing all three people |
+| `job.schema.json` | A — job record | v2: season, attempt, error_code, progress/stage, timestamps |
+| `events.schema.json` | B — event record | v2: UUID event_id, nullable track_id, corrected/correction_id |
+| `tracks.schema.json` | C — track record | v2: **required `gaps`**, `team_confidence` |
+| `correction.schema.json` | F — corrections | v2: `scope` (event/track), `target_id` |
+| `result.schema.json` | D — `result.json` metadata | key names now pinned by doc 0 |
+| `seasons/<year>.json` | field, periods, point values | per year, selected by `job.season` |
+| `OPEN_QUESTIONS.md` | — | **all thirteen resolved in v2** |
 
 Doc 0 names `events.schema.json`, `job.schema.json` and `enums.md`. The other files are
 transcriptions of contracts that doc 0 states normatively in prose (Contract C, the
@@ -26,41 +26,16 @@ Validate the fixtures against these schemas with:
 
     cd web && npm run validate:fixtures
 
-## Merge note — three contract sets became one
+## SCHEMA_VERSION 2
 
-Component 2 and component 3 each wrote `/contracts/` independently before comparing, which
-is the one directory doc 0 says must not happen twice. They have been merged. **Everything
-below is a change from the version committed in `f3713ef`, listed so it can be reviewed
-rather than discovered.**
+All thirteen questions raised against v1 are resolved; the rulings are in doc 0's changelog.
+Two provisional stances from v1 were overturned, and both would have caused real damage:
 
-Kept from component 2's version:
+- **Splitting tracks at gaps** would have undone re-identification, whose whole purpose is
+  stitching a robot's fragments into one logical track. v2 keeps one track with an explicit
+  `gaps` array. The interpolation threshold that stood in for it is deleted.
+- **A single current-season config** breaks the first time someone loads 2025 footage. Season
+  configs are per year and selected by `job.season`.
 
-- `alliances.red` / `alliances.blue` constrained to exactly 3 teams. Doc 0 says the alliance
-  list exists to "narrow bumper OCR candidates to three per side", so three is the point.
-  Component 3's version had no such constraint; this is strictly better.
-- `match_id` in the job's `required` list.
-
-Changed, with reasons:
-
-- **`events.schema.json`: `event_type` gained its enum.** It was `{"type": "string"}`, which
-  accepts any value. Doc 0: "Closed sets... Anything unrecognized is a bug, not a fallback."
-- **`events.schema.json`: `track_id` is now nullable.** It was required non-nullable, which
-  makes `match_start`, `match_end` and `phase_change` unrepresentable — none of them belong
-  to a track. See OPEN_QUESTIONS #1; this is flagged, not settled.
-- **`job.schema.json`: `match_id` is now nullable.** It was `{"type": "string"}`. Contract E
-  is explicit: "returns the job with `match_id: null` if it cannot" resolve it. The ingest
-  service currently substitutes the string `"unknown"`, which is not a valid TBA key and
-  collides across every unresolved job.
-- **`job.schema.json`: `duration`/`fps`/`width`/`height` are nullable, conditionally
-  required.** They cannot be known before the download completes, and they must be present
-  after it. See OPEN_QUESTIONS #13.
-- **`job.schema.json`: `error` is required when `status` is `failed`.** Doc 2 treats failed
-  downloads as routine; a retry path needs a reason to show.
-- **`enums.md` gained the units and coordinate systems section**, verbatim from doc 0: time
-  base, image space, field space, confidence, booleans, identifier formats, naming. Doc 0
-  calls these "the most likely source of silent breakage" and component 2's version omitted
-  them entirely.
-- **Added** `SCHEMA_VERSION` (doc 0: "an integer in `/contracts/`"), plus the track,
-  correction, result and season-config files.
-- Schemas moved from draft-07 to 2020-12. `jsonschema` on the Python side and `ajv` on the
-  TypeScript side both support it.
+Point values stay at zero until a game is public. Score reconstruction is not meaningful
+until they are filled in, and the UI says so rather than showing a confident delta.

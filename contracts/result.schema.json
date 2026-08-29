@@ -1,20 +1,32 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://frc-video-scouting/contracts/result.schema.json",
-  "title": "Analysis run metadata (Contract D, result.json)",
-  "description": "Written by component 1 to <out>/result.json on success. Doc 0 names the fields it carries; the key names below are this file's contribution and are the one thing here worth confirming with component 1 (see OPEN_QUESTIONS.md #2).",
+  "title": "Analysis run metadata (Contract D result.json, v2)",
+  "description": "Written by component 1 to <out>/result.json. Key names are pinned by doc 0.",
   "type": "object",
   "additionalProperties": true,
-  "required": ["schema_version", "box_sample_rate", "homography_ok", "model_version"],
+  "required": [
+    "schema_version", "job_id", "model_version", "box_sample_rate", "homography_ok",
+    "frames_total", "frames_analyzed", "frames_skipped_shot_change",
+    "tracks_emitted", "events_emitted", "reconstructed_score", "started_at", "finished_at"
+  ],
   "properties": {
-    "schema_version": { "type": "integer", "const": 1 },
+    "schema_version": { "type": "integer", "const": 2 },
+    "job_id": { "type": "string", "format": "uuid" },
+    "model_version": { "type": "string" },
     "box_sample_rate": {
       "type": "number",
       "exclusiveMinimum": 0,
-      "description": "Hz. Box samples per second in tracks.jsonl. Component 3 interpolates between samples using this."
+      "description": "Hertz -- samples per second, not a frame interval. Served to component 3 on the tracks response."
     },
-    "homography_ok": { "type": "boolean", "description": "Whether field-space projection succeeded for this run." },
+    "homography_ok": { "type": "boolean" },
+    "frames_total": { "type": "integer", "minimum": 0 },
+    "frames_analyzed": { "type": "integer", "minimum": 0 },
+    "frames_skipped_shot_change": { "type": "integer", "minimum": 0 },
+    "tracks_emitted": { "type": "integer", "minimum": 0 },
+    "events_emitted": { "type": "integer", "minimum": 0 },
     "reconstructed_score": {
+      "description": "Null while the season's point values are placeholders.",
       "oneOf": [
         { "type": "null" },
         {
@@ -25,8 +37,7 @@
         }
       ]
     },
-    "frames_analyzed": { "type": "integer", "minimum": 0 },
-    "frames_skipped_shot_change": { "type": "integer", "minimum": 0 },
-    "model_version": { "type": "string" }
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" }
   }
 }

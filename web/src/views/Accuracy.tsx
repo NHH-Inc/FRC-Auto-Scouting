@@ -1,32 +1,34 @@
 import type { Accuracy as AccuracyData } from '../api/shapes';
 import { fmtSigned } from '../lib/format';
+import { pointValuesArePlaceholders, type SeasonConfig } from '../season';
 
 // Doc 3: "Reconstructed score vs. TBA official score, as a visible accuracy indicator per
 // match." Doc 1 is blunter: "If the pipeline's reconstructed score does not match TBA's
 // official score for the same match, the pipeline is wrong. That comparison is the main
 // evaluation loop."
 //
-// So this panel reads from RAW model output, not the corrected view. Scoring a corrected
-// event stream against TBA would measure the humans, not the model, and the number would
-// improve every time somebody fixed a row by hand.
+// Scored from RAW model output, never the corrected stream -- that would measure the
+// reviewers, and the number would improve every time somebody fixed a row by hand.
 
 export interface AccuracyPanelProps {
   accuracy: AccuracyData | null;
+  season: SeasonConfig | null;
   /** True when the numbers came from raw, uncorrected events. */
   fromRaw: boolean;
 }
 
-export function AccuracyPanel({ accuracy, fromRaw }: AccuracyPanelProps) {
+export function AccuracyPanel({ accuracy, season, fromRaw }: AccuracyPanelProps) {
   if (!accuracy) {
     return (
       <div className="panel">
         <div className="panel-head"><h2>Score accuracy</h2></div>
-        <p className="empty">No accuracy data. This needs a TBA score for the match.</p>
+        <p className="empty">No accuracy data for this match.</p>
       </div>
     );
   }
 
-  const { reconstructed, tba, delta } = accuracy;
+  const placeholders = season == null || pointValuesArePlaceholders(season);
+  const { reconstructed, tba, delta, tbaAvailable } = accuracy;
   const mae = delta ? (Math.abs(delta.red) + Math.abs(delta.blue)) / 2 : null;
   const grade = mae == null ? null : mae <= 3 ? 'good' : mae <= 10 ? 'fair' : 'bad';
 
@@ -36,6 +38,33 @@ export function AccuracyPanel({ accuracy, fromRaw }: AccuracyPanelProps) {
         <h2>Score accuracy</h2>
         <span className="muted">reconstructed vs TBA official</span>
       </div>
+
+      {/* Doc 0: "Point values are zero placeholders until the game is public. Score
+          reconstruction is not meaningful until they are filled in, and that is expected."
+          Showing a confident delta against an all-zero scoring model would be a lie. */}
+      {placeholders && (
+        <div className="acc-verdict fair">
+          <strong>Not meaningful yet.</strong>
+          <span className="muted">
+            {' '}
+            Every point value in{' '}
+            <code>contracts/seasons/{season?.season ?? '<year>'}.json</code> is still a zero
+            placeholder, so the reconstruction below is zero by construction — not a pipeline
+            failure. Fill the values in once the game is public.
+          </span>
+        </div>
+      )}
+
+      {!tbaAvailable && (
+        <div className="acc-verdict fair">
+          <strong>No TBA data for this match.</strong>
+          <span className="muted">
+            {' '}
+            There is nothing to compare against — which is different from a reconstruction that
+            matched.
+          </span>
+        </div>
+      )}
 
       <div className="acc-grid">
         <div />
@@ -52,14 +81,14 @@ export function AccuracyPanel({ accuracy, fromRaw }: AccuracyPanelProps) {
 
         <div className="acc-row">Delta</div>
         <div className={`acc-val delta ${delta && delta.red !== 0 ? 'off' : ''}`}>
-          {delta ? fmtSigned(delta.red) : '--'}
+          {delta && !placeholders ? fmtSigned(delta.red) : '--'}
         </div>
         <div className={`acc-val delta ${delta && delta.blue !== 0 ? 'off' : ''}`}>
-          {delta ? fmtSigned(delta.blue) : '--'}
+          {delta && !placeholders ? fmtSigned(delta.blue) : '--'}
         </div>
       </div>
 
-      {mae != null && (
+      {mae != null && !placeholders && (
         <div className={`acc-verdict ${grade}`}>
           <strong>{mae.toFixed(1)} pts</strong> mean absolute error
           <span className="muted">
@@ -77,8 +106,6 @@ export function AccuracyPanel({ accuracy, fromRaw }: AccuracyPanelProps) {
         {fromRaw
           ? '. Corrections are deliberately excluded — scoring the corrected stream would measure the reviewers, not the model.'
           : '. Warning: this includes human corrections, so it flatters the model.'}
-        {' '}Point values come from the season config, which is a placeholder until the 2026
-        game is public.
       </p>
     </div>
   );

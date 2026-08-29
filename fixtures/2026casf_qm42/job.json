@@ -1,7 +1,8 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "job_id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
   "match_id": "2026casf_qm42",
+  "season": 2026,
   "video_id": "dQw4w9WgXcQ",
   "local_path": "/data/segments/dQw4w9WgXcQ_00120_00272.mp4",
   "start_offset": 120,
@@ -10,6 +11,13 @@
   "width": 640,
   "height": 360,
   "status": "complete",
+  "stage": null,
+  "progress": null,
+  "error_code": null,
+  "error": null,
+  "attempt": 1,
+  "created_at": "2026-08-28T14:20:00Z",
+  "updated_at": "2026-08-28T14:26:04Z",
   "alliances": {
     "red": [
       254,
@@ -23,7 +31,7 @@
     ]
   },
   "tba_score": {
-    "red": 90,
-    "blue": 60
+    "red": 91,
+    "blue": 84
   }
 }

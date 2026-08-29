@@ -1,12 +1,10 @@
-// Validates every fixture against /contracts/*.schema.json.
+// Validates every fixture against /contracts/*.schema.json at SCHEMA_VERSION 2.
 //
 // Doc 0: "If your component works against the fixtures, it will work against the others."
-// That only holds if the fixtures actually satisfy the contracts, so this checks. Run it
-// before trusting anything the UI shows:
+// That only holds if the fixtures actually satisfy the contracts, so this checks. It also
+// enforces doc 0's requirement that fixture coverage include the awkward cases.
 //
 //     npm run validate:fixtures
-//
-// Exits nonzero on the first schema that fails, so it can go straight into CI.
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
@@ -45,6 +43,11 @@ const validators = {
 let failures = 0;
 let checked = 0;
 
+function fail(msg) {
+  failures++;
+  console.error(`  FAIL ${msg}`);
+}
+
 function check(kind, rows, label) {
   const validate = validators[kind];
   let bad = 0;
@@ -52,10 +55,9 @@ function check(kind, rows, label) {
     checked++;
     if (!validate(row)) {
       bad++;
-      failures++;
       if (bad <= 3) {
-        const where = rows.length > 1 ? ` [row ${i + 1}]` : '';
-        console.error(`  FAIL ${label}${where}`);
+        failures++;
+        console.error(`  FAIL ${label}${rows.length > 1 ? ` [row ${i + 1}]` : ''}`);
         for (const err of validate.errors ?? []) {
           console.error(`       ${err.instancePath || '/'} ${err.message}`);
         }
@@ -69,6 +71,9 @@ function check(kind, rows, label) {
 const expectedVersion = Number(readFileSync(join(CONTRACTS, 'SCHEMA_VERSION'), 'utf8').trim());
 console.log(`SCHEMA_VERSION ${expectedVersion}\n`);
 
+const seasons = readdirSync(join(CONTRACTS, 'seasons')).filter((f) => f.endsWith('.json'));
+console.log(`season configs: ${seasons.join(', ')}\n`);
+
 const dirs = readdirSync(FIXTURES).filter(
   (d) => statSync(join(FIXTURES, d)).isDirectory() && d !== 'tools'
 );
@@ -77,39 +82,66 @@ if (dirs.length === 0) {
   process.exit(1);
 }
 
+// Doc 0: "Fixture coverage must include the awkward cases, not just the happy path."
+const coverage = {
+  'track with a shot_change gap': false,
+  'unidentified track (team: null)': false,
+  'match-level event (track_id: null)': false,
+  'failed job with an error_code': false,
+  'match with alliances: null': false,
+};
+
 for (const dir of dirs) {
   const base = join(FIXTURES, dir);
   console.log(`fixtures/${dir}`);
 
-  const files = {
-    job: ['job.json', 'job', readJson],
-    result: ['result.json', 'result', readJson],
-    events: ['events.jsonl', 'event', readJsonl],
-    tracks: ['tracks.jsonl', 'track', readJsonl],
-    corrections: ['corrections.jsonl', 'correction', readJsonl],
-  };
+  if (!existsSync(join(base, 'job.json'))) {
+    fail(`${dir} has no job.json`);
+    continue;
+  }
+  const job = readJson(join(base, 'job.json'));
+  check('job', [job], 'job.json');
 
-  for (const [name, kind, read] of Object.values(files)) {
-    const path = join(base, name);
-    if (!existsSync(path)) {
-      // corrections.jsonl is component 3's addition, not one of doc 0's five artifacts.
-      if (name === 'corrections.jsonl') continue;
-      console.error(`  MISS ${name}`);
-      failures++;
-      continue;
-    }
-    const parsed = read(path);
-    check(kind, Array.isArray(parsed) ? parsed : [parsed], name);
+  if (job.schema_version !== expectedVersion) {
+    fail(`job.schema_version ${job.schema_version} != SCHEMA_VERSION ${expectedVersion}`);
+  }
+  if (job.status === 'failed' && job.error_code) coverage['failed job with an error_code'] = true;
+  if (job.alliances === null) coverage['match with alliances: null'] = true;
+
+  // The season the job names must actually exist.
+  if (!existsSync(join(CONTRACTS, 'seasons', `${job.season}.json`))) {
+    fail(`job.season ${job.season} has no contracts/seasons/${job.season}.json`);
   }
 
-  // Cross-file invariants the schemas cannot express on their own.
-  const job = readJson(join(base, 'job.json'));
+  // A failed job never produced analysis output; requiring it would be wrong.
+  if (job.status === 'failed') {
+    console.log('  ok   failed job carries error_code, no analysis output expected');
+    console.log('');
+    continue;
+  }
+
+  for (const [name, kind] of [
+    ['result.json', 'result'],
+    ['events.jsonl', 'event'],
+    ['tracks.jsonl', 'track'],
+    ['corrections.jsonl', 'correction'],
+  ]) {
+    const path = join(base, name);
+    if (!existsSync(path)) {
+      if (name === 'corrections.jsonl') continue;
+      fail(`${name} missing`);
+      continue;
+    }
+    const parsed = name.endsWith('.jsonl') ? readJsonl(path) : [readJson(path)];
+    check(kind, parsed, name);
+  }
+
   const events = readJsonl(join(base, 'events.jsonl'));
   const tracks = readJsonl(join(base, 'tracks.jsonl'));
-
+  const result = readJson(join(base, 'result.json'));
   const problems = [];
 
-  // Contract B: "in ascending t_seconds order".
+  // Contract B: "ascending by t_seconds".
   for (let i = 1; i < events.length; i++) {
     if (events[i].t_seconds < events[i - 1].t_seconds) {
       problems.push(`events.jsonl not sorted by t_seconds at row ${i + 1}`);
@@ -117,13 +149,24 @@ for (const dir of dirs) {
     }
   }
 
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const ids = new Set();
+  const MATCH_LEVEL = new Set(['match_start', 'match_end', 'phase_change']);
   for (const e of events) {
+    if (!UUID.test(e.event_id)) problems.push(`event_id ${e.event_id} is not a UUIDv4`);
     if (ids.has(e.event_id)) problems.push(`duplicate event_id ${e.event_id}`);
     ids.add(e.event_id);
     if (e.job_id !== job.job_id) problems.push(`event ${e.event_id} has a foreign job_id`);
     if (e.match_id !== job.match_id) problems.push(`event ${e.event_id} has a foreign match_id`);
-    if (e.t_seconds > job.duration) problems.push(`event ${e.event_id} is past the segment end`);
+    if (job.duration != null && e.t_seconds > job.duration) {
+      problems.push(`event ${e.event_id} is past the segment end`);
+    }
+    if (MATCH_LEVEL.has(e.event_type)) {
+      coverage['match-level event (track_id: null)'] = true;
+      if (e.track_id !== null || e.team !== null) {
+        problems.push(`${e.event_type} ${e.event_id} must have null team and track_id`);
+      }
+    }
   }
 
   const trackIds = new Set(tracks.map((t) => t.track_id));
@@ -133,8 +176,23 @@ for (const dir of dirs) {
     }
   }
 
-  // Image space is normalised 0..1 (doc 0). A box outside it means a pixel leaked through.
   for (const t of tracks) {
+    if (t.team === null) coverage['unidentified track (team: null)'] = true;
+    if (!Array.isArray(t.gaps)) {
+      problems.push(`track ${t.track_id} has no gaps array (required, may be empty)`);
+      continue;
+    }
+    for (const g of t.gaps) {
+      if (g.reason === 'shot_change') coverage['track with a shot_change gap'] = true;
+      if (g.end <= g.start) problems.push(`track ${t.track_id} has a gap ending before it starts`);
+      // The whole point of declaring a gap is that nothing was observed inside it.
+      const inside = t.boxes.filter((b) => b.t >= g.start && b.t <= g.end);
+      if (inside.length > 0) {
+        problems.push(
+          `track ${t.track_id} has ${inside.length} box(es) inside its ${g.reason} gap`
+        );
+      }
+    }
     for (const b of t.boxes) {
       if (b.x < 0 || b.y < 0 || b.x + b.w > 1.0001 || b.y + b.h > 1.0001) {
         problems.push(`track ${t.track_id} has a box outside normalised image space at t=${b.t}`);
@@ -143,28 +201,39 @@ for (const dir of dirs) {
     }
   }
 
-  // A team on a track must be one of the teams TBA says played.
+  // A team on a track must be one of the teams TBA says played -- when TBA said anything.
   if (job.alliances) {
     const playing = new Set([...job.alliances.red, ...job.alliances.blue]);
     for (const t of tracks) {
       if (t.team != null && !playing.has(t.team)) {
-        problems.push(`track ${t.track_id} claims team ${t.team}, which is not in this match`);
+        problems.push(`track ${t.track_id} claims team ${t.team}, which did not play this match`);
       }
     }
   }
 
-  const unique = [...new Set(problems)];
-  for (const p of unique.slice(0, 8)) {
-    console.error(`  FAIL ${p}`);
-    failures++;
+  if (result.job_id !== job.job_id) problems.push('result.json job_id does not match the job');
+  if (result.tracks_emitted !== tracks.length) {
+    problems.push(`result.tracks_emitted ${result.tracks_emitted} != ${tracks.length} tracks`);
   }
+  if (result.events_emitted !== events.length) {
+    problems.push(`result.events_emitted ${result.events_emitted} != ${events.length} events`);
+  }
+
+  const unique = [...new Set(problems)];
+  for (const p of unique.slice(0, 8)) fail(p);
   if (unique.length > 8) console.error(`       …and ${unique.length - 8} more`);
   if (unique.length === 0) console.log('  ok   cross-file invariants');
   console.log('');
 }
 
+console.log('required awkward-case coverage');
+for (const [what, covered] of Object.entries(coverage)) {
+  if (covered) console.log(`  ok   ${what}`);
+  else fail(`no fixture covers: ${what}`);
+}
+
 if (failures > 0) {
-  console.error(`${failures} problem(s) across ${checked} records.`);
+  console.error(`\n${failures} problem(s) across ${checked} records.`);
   process.exit(1);
 }
-console.log(`All fixtures valid — ${checked} records against ${Object.keys(validators).length} schemas.`);
+console.log(`\nAll fixtures valid — ${checked} records against ${Object.keys(validators).length} schemas.`);

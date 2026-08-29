@@ -29,6 +29,8 @@ If segments were clipped out of a longer stream, the player needs the `start_off
 
 Build this early. Users will find wrong calls, and a tool that cannot be corrected will not be trusted.
 
+The most common correction is a misread bumper, and it is a **track-level** fix, not an event-level one. One bad OCR read mislabels forty-odd events and every box on that robot. `PATCH /api/jobs/:job_id/tracks/:track_id` re-attributes the track and all its events in one action. Build that path first; per-event editing is the exception.
+
 Minimum useful version: scrub to an event, see what the pipeline claimed, fix the team attribution or delete the event, add a missed one. Corrections serve two purposes at once. They fix the user's data, and they become labeled training data for the next model iteration.
 
 Every event carries a confidence score. Surface it, and let users filter the view by threshold. Low-confidence events should be visually distinct so people know where to look first.
@@ -42,11 +44,7 @@ Every event carries a confidence score. Surface it, and let users filter the vie
 
 ## Storage
 
-Raw timestamped events are the source of truth. One row per event:
-
-```
-{ match_id, team, t_seconds, phase, event_type, confidence, field_x, field_y }
-```
+Raw timestamped events are the source of truth. **The event row is Contract B in document 0, not the eight-field subset this section used to list.** `event_id` and `source` in particular are load-bearing: without the first there is nothing for a correction to reference, and without the second a model inference, a scoreboard OCR read and a human fix are indistinguishable.
 
 Never store aggregates as primary data. Every stat is a query over the event table. Postgres or SQLite.
 

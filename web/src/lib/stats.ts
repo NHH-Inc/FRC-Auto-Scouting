@@ -1,36 +1,37 @@
 // Aggregates.
 //
-// Doc 0: "Aggregates are never stored, only queried." Doc 3: "Never store aggregates as
-// primary data. Every stat is a query over the event table." So every number below is
-// derived on demand from a ScoutEvent[] and nothing here is ever persisted or cached to
-// disk. In fixture mode these run in the browser; against a real backend the same shapes
-// come from GET /api/teams/:team/stats.
+// Doc 0: "Aggregates are never stored, only queried." Every number below is derived on demand
+// from a ScoutEvent[]; nothing here is persisted or cached.
 
 import type { Alliance, EventType, Phase, ScoutEvent } from '../contracts';
-import { SEASON, PHASE_BOUNDS } from '../season';
+import { phaseBounds, pointValuesArePlaceholders, type SeasonConfig } from '../season';
+
+export interface ScoreBreakdown { red: number; blue: number }
 
 export interface TeamStats {
   team: number;
   alliance: Alliance | null;
   shotAttempts: number;
   shotsMade: number;
-  /** Made / attempted. null when the team never attempted a shot. */
+  /** Made / attempted. Null when the team never attempted a shot. */
   accuracy: number | null;
   reloads: number;
   /**
-   * Doc 3: "Per-robot cycle time alone is useful enough to hand to a drive team."
-   * A cycle is one acquire-to-acquire loop, measured between consecutive `reload` events.
-   * Reload is the anchor rather than a shot because a missed shot should still cost a cycle.
+   * Doc 0's vocabulary: "the interval between one `reload` event and the next `reload` event
+   * for the same team. Acquire to acquire, not acquire to score, so a missed shot still costs
+   * a cycle... An unterminated final cycle is discarded, not counted."
    */
   cycleCount: number;
   medianCycleSeconds: number | null;
   bestCycleSeconds: number | null;
   cycleSeconds: number[];
+  /** Doc 1: "Shot rate: interval between consecutive shot events." */
+  avgShotIntervalSeconds: number | null;
   defenseSeconds: number;
   immobileSeconds: number;
   fouls: number;
-  /** Points this team's made shots are worth under the season config. */
   pointsContributed: number;
+  lowConfidenceEvents: number;
   byPhase: Record<Phase, { attempts: number; made: number }>;
 }
 
@@ -48,11 +49,25 @@ function median(xs: number[]): number | null {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+function mean(xs: number[]): number | null {
+  return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+}
+
 /**
- * Total seconds spanned by start/end pairs of the given types.
- * An unclosed interval is held open to `matchEnd` rather than dropped -- a robot that goes
- * immobile and never recovers was immobile for the rest of the match.
+ * Points for one made shot in a phase.
+ *
+ * `shot_made` does not say which goal it went in -- that would need a contract change, since
+ * event_type is a closed set and there is no goal field. Until then this reads
+ * `shot_made_high`. All point values are zero placeholders anyway; doc 0: "Do not invent
+ * values to make a test pass."
  */
+export function pointsFor(phase: Phase, cfg: SeasonConfig | null): number {
+  if (!cfg) return 0;
+  const group = cfg.pointValues[phase];
+  if (!group) return 0;
+  return group.shot_made_high ?? 0;
+}
+
 function pairedSeconds(
   events: ScoutEvent[],
   startType: EventType,
@@ -76,11 +91,11 @@ export function computeTeamStats(
   team: number,
   allEvents: ScoutEvent[],
   alliance: Alliance | null = null,
-  matchEnd: number = PHASE_BOUNDS.matchEnd
+  cfg: SeasonConfig | null = null,
+  lowConfidenceThreshold = 0.5
 ): TeamStats {
-  const mine = allEvents
-    .filter((e) => e.team === team)
-    .sort((a, b) => a.tSeconds - b.tSeconds);
+  const matchEnd = cfg ? phaseBounds(cfg).matchEnd : Infinity;
+  const mine = allEvents.filter((e) => e.team === team).sort((a, b) => a.tSeconds - b.tSeconds);
 
   const byPhase = EMPTY_PHASES();
   let shotAttempts = 0;
@@ -88,18 +103,22 @@ export function computeTeamStats(
   let reloads = 0;
   let fouls = 0;
   let pointsContributed = 0;
+  let lowConfidenceEvents = 0;
   const reloadTimes: number[] = [];
+  const shotTimes: number[] = [];
 
   for (const e of mine) {
+    if (e.confidence < lowConfidenceThreshold) lowConfidenceEvents++;
     switch (e.eventType) {
       case 'shot_attempt':
         shotAttempts++;
+        shotTimes.push(e.tSeconds);
         byPhase[e.phase].attempts++;
         break;
       case 'shot_made':
         shotsMade++;
         byPhase[e.phase].made++;
-        pointsContributed += pointsFor(e.phase);
+        pointsContributed += pointsFor(e.phase, cfg);
         break;
       case 'reload':
         reloads++;
@@ -113,10 +132,14 @@ export function computeTeamStats(
     }
   }
 
+  // Acquire-to-acquire. An unterminated final cycle is simply never formed, since a cycle
+  // only exists between two reloads.
   const cycleSeconds: number[] = [];
   for (let i = 1; i < reloadTimes.length; i++) {
     cycleSeconds.push(reloadTimes[i] - reloadTimes[i - 1]);
   }
+  const shotIntervals: number[] = [];
+  for (let i = 1; i < shotTimes.length; i++) shotIntervals.push(shotTimes[i] - shotTimes[i - 1]);
 
   return {
     team,
@@ -129,37 +152,29 @@ export function computeTeamStats(
     medianCycleSeconds: median(cycleSeconds),
     bestCycleSeconds: cycleSeconds.length ? Math.min(...cycleSeconds) : null,
     cycleSeconds,
+    avgShotIntervalSeconds: mean(shotIntervals),
     defenseSeconds: pairedSeconds(mine, 'defense_start', 'defense_end', matchEnd),
     immobileSeconds: pairedSeconds(mine, 'immobile_start', 'immobile_end', matchEnd),
     fouls,
     pointsContributed,
+    lowConfidenceEvents,
     byPhase,
   };
 }
 
-export function pointsFor(phase: Phase): number {
-  if (phase === 'auto') return SEASON.scoring.shotMade.auto;
-  if (phase === 'teleop') return SEASON.scoring.shotMade.teleop;
-  if (phase === 'endgame') return SEASON.scoring.shotMade.endgame;
-  return 0;
-}
-
-export interface ScoreBreakdown {
-  red: number;
-  blue: number;
-}
-
 /**
- * Reconstruct the match score from events, for the "reconstructed vs TBA" indicator doc 3
- * asks for. Events with a null team contribute nothing -- an unidentified robot cannot be
- * credited to an alliance, and guessing would quietly inflate the accuracy number.
+ * Reconstruct the match score from events, for the "reconstructed vs TBA" indicator.
+ *
+ * Events with a null team contribute nothing -- an unidentified robot cannot be credited to
+ * an alliance, and guessing would quietly inflate the accuracy number this exists to test.
  */
 export function reconstructScore(
   events: ScoutEvent[],
-  alliances: { red: number[]; blue: number[] } | null
+  alliances: { red: number[]; blue: number[] } | null,
+  cfg: SeasonConfig | null
 ): ScoreBreakdown {
   const out: ScoreBreakdown = { red: 0, blue: 0 };
-  if (!alliances) return out;
+  if (!alliances || !cfg) return out;
   const sideOf = (team: number | null): Alliance | null => {
     if (team == null) return null;
     if (alliances.red.includes(team)) return 'red';
@@ -169,66 +184,12 @@ export function reconstructScore(
   for (const e of events) {
     const side = sideOf(e.team);
     if (!side) continue;
-    if (e.eventType === 'shot_made') out[side] += pointsFor(e.phase);
-    if (e.eventType === 'foul') {
-      out[side === 'red' ? 'blue' : 'red'] += SEASON.scoring.foulPointsToOpponent;
-    }
+    if (e.eventType === 'shot_made') out[side] += pointsFor(e.phase, cfg);
   }
   return out;
 }
 
-export interface AccuracyReport {
-  reconstructed: ScoreBreakdown;
-  tba: ScoreBreakdown | null;
-  delta: ScoreBreakdown | null;
-  /** Mean absolute error across both alliances, in points. null without a TBA score. */
-  meanAbsError: number | null;
-}
-
-export function accuracyReport(
-  events: ScoutEvent[],
-  alliances: { red: number[]; blue: number[] } | null,
-  tba: ScoreBreakdown | null
-): AccuracyReport {
-  const reconstructed = reconstructScore(events, alliances);
-  if (!tba) return { reconstructed, tba: null, delta: null, meanAbsError: null };
-  const delta = { red: reconstructed.red - tba.red, blue: reconstructed.blue - tba.blue };
-  return {
-    reconstructed,
-    tba,
-    delta,
-    meanAbsError: (Math.abs(delta.red) + Math.abs(delta.blue)) / 2,
-  };
-}
-
-/** Roll per-match team stats up across an event or a season. */
-export function mergeTeamStats(rows: TeamStats[]): TeamStats | null {
-  if (rows.length === 0) return null;
-  const cycleSeconds = rows.flatMap((r) => r.cycleSeconds);
-  const shotAttempts = rows.reduce((n, r) => n + r.shotAttempts, 0);
-  const shotsMade = rows.reduce((n, r) => n + r.shotsMade, 0);
-  const byPhase = EMPTY_PHASES();
-  for (const r of rows) {
-    for (const p of Object.keys(byPhase) as Phase[]) {
-      byPhase[p].attempts += r.byPhase[p].attempts;
-      byPhase[p].made += r.byPhase[p].made;
-    }
-  }
-  return {
-    team: rows[0].team,
-    alliance: rows[0].alliance,
-    shotAttempts,
-    shotsMade,
-    accuracy: shotAttempts > 0 ? shotsMade / shotAttempts : null,
-    reloads: rows.reduce((n, r) => n + r.reloads, 0),
-    cycleCount: cycleSeconds.length,
-    medianCycleSeconds: median(cycleSeconds),
-    bestCycleSeconds: cycleSeconds.length ? Math.min(...cycleSeconds) : null,
-    cycleSeconds,
-    defenseSeconds: rows.reduce((n, r) => n + r.defenseSeconds, 0),
-    immobileSeconds: rows.reduce((n, r) => n + r.immobileSeconds, 0),
-    fouls: rows.reduce((n, r) => n + r.fouls, 0),
-    pointsContributed: rows.reduce((n, r) => n + r.pointsContributed, 0),
-    byPhase,
-  };
+/** Whether a reconstructed score means anything yet. */
+export function scoringIsMeaningful(cfg: SeasonConfig | null): boolean {
+  return cfg != null && !pointValuesArePlaceholders(cfg);
 }

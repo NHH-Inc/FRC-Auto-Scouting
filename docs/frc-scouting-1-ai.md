@@ -30,6 +30,10 @@ A homography maps image coordinates onto a top-down field plane, using fixed fie
 
 Shot-change detection is required. Official streams cut to replays and closeups, which invalidates the homography and breaks tracks. Those segments should be detected and skipped, not analyzed.
 
+Skipped intervals must be reported explicitly in each track's `gaps` array (Contract C) with `reason: "shot_change"`. Same for occlusion, out-of-frame and lost detection. Without this, a four-second hole is indistinguishable from a low sample rate and the frontend draws a robot gliding through footage nobody analyzed. Do not split a track at a gap: re-identification exists to stitch fragments into one logical track, and splitting undoes it.
+
+`phase` is not detected. It is a pure function of match-relative time and the season config at `/contracts/seasons/<year>.json`, specified in document 0. Read `auto_seconds`, `teleop_seconds` and `endgame_seconds` from that file. Hardcoding 15, 135 or 20 will silently disagree with the frontend's timeline bands.
+
 ## Robot identification
 
 ByteTrack assigns arbitrary track IDs. Mapping a track ID to a team number is the hardest part of the project.
@@ -48,7 +52,7 @@ Game pieces are not tracked in flight. They are too small, too fast, and they le
 - Made shot: scoring event detected at the goal region
 - Reload: robot overlapping a source or human player station
 - Shot rate: interval between consecutive shot events, not projectile velocity
-- Cycle time: interval between consecutive reload and score events for the same track
+- Cycle time: interval between consecutive `reload` events for the same **team**. Acquire to acquire, so a missed shot still costs a cycle. Per team rather than per track, because track ids are job-local and a re-identified robot may span several. Definition lives in document 0's vocabulary section; do not redefine it here.
 
 Everything is correlated by timestamp, then validated against the TBA score total for the match.
 
@@ -60,13 +64,15 @@ Overlay position and design change every season and vary between event AV setups
 
 ## Output format
 
-The backend emits one row per event:
+**Do not build the event row from this document. Contract B in document 0 is authoritative.** An earlier version of this section listed an eight-field subset that is missing `schema_version`, `job_id`, `event_id`, `track_id` and `source`. Emitting that subset breaks the corrections layer, the accuracy comparison and the training-data export.
 
-```
-{ match_id, team, t_seconds, phase, event_type, confidence, field_x, field_y }
-```
+Three outputs per run, all specified in document 0:
 
-Every event carries a confidence value. Nothing is aggregated at this layer. Aggregation happens downstream as queries over the event table.
+- `events.jsonl` — Contract B, one JSON object per line, ascending by `t_seconds`
+- `tracks.jsonl` — Contract C, one object per track, `gaps` array required
+- `result.json` — Contract D, pinned key names
+
+`event_id` is generated here, not by the database, because corrections reference it before anything is stored. Every event carries a confidence value and a `source`. Nothing is aggregated at this layer; aggregation happens downstream as queries over the event table.
 
 ## Training data
 

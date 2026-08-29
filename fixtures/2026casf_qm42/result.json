@@ -1,12 +1,15 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "job_id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
+  "model_version": "fixture-synthetic-0.2.0",
   "box_sample_rate": 5,
   "homography_ok": true,
-  "reconstructed_score": {
-    "red": 83,
-    "blue": 64
-  },
-  "frames_analyzed": 4442,
-  "frames_skipped_shot_change": 118,
-  "model_version": "fixture-synthetic-0.1.0"
+  "frames_total": 4560,
+  "frames_analyzed": 4434,
+  "frames_skipped_shot_change": 126,
+  "tracks_emitted": 7,
+  "events_emitted": 228,
+  "reconstructed_score": null,
+  "started_at": "2026-08-28T14:22:31Z",
+  "finished_at": "2026-08-28T14:26:04Z"
 }

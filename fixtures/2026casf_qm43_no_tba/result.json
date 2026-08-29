@@ -1,0 +1,15 @@
+{
+  "schema_version": 2,
+  "job_id": "4b7c2e19-3d5a-4f81-9c06-8e1b2a7d5f30",
+  "model_version": "fixture-synthetic-0.2.0",
+  "box_sample_rate": 5,
+  "homography_ok": true,
+  "frames_total": 4560,
+  "frames_analyzed": 4560,
+  "frames_skipped_shot_change": 0,
+  "tracks_emitted": 2,
+  "events_emitted": 2,
+  "reconstructed_score": null,
+  "started_at": "2026-08-28T15:03:10Z",
+  "finished_at": "2026-08-28T15:07:44Z"
+}

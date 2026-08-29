@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getApi } from './api';
 import { isPlayable } from './contracts';
+import { seasonConfig } from './season';
 import { EventInspector } from './components/EventInspector';
 import { ExportPanel } from './components/ExportPanel';
 import { Sidebar } from './components/Sidebar';
@@ -68,6 +69,10 @@ export default function App() {
   // defaulting a duration and drawing a wrong scrub bar, the stage says so.
   const playable = isPlayable(job) ? job : null;
 
+  // Doc 0: the season config is selected by the job's `season` field, so old footage stays
+  // analyzable after the game changes. An unknown season is a bug, not something to guess.
+  const season = job ? seasonConfig(job.season) : null;
+
   const seek = useCallback((t: number) => {
     setSeekTo({ t, nonce: Date.now() });
   }, []);
@@ -111,6 +116,18 @@ export default function App() {
           </div>
         )}
 
+        {job && season == null && (
+          <div className="stage-empty">
+            <p>
+              No season config for <strong>{job.season}</strong>.
+            </p>
+            <p className="muted">
+              Add <code>contracts/seasons/{job.season}.json</code>. Phase boundaries and field
+              dimensions both come from it, so the timeline and heat map cannot be drawn without it.
+            </p>
+          </div>
+        )}
+
         {job && job.status === 'complete' && !playable && (
           <div className="stage-empty">
             <p>
@@ -126,7 +143,7 @@ export default function App() {
           </div>
         )}
 
-        {job && playable && videoSrc && (
+        {job && playable && season && videoSrc && (
           <>
             {job.status !== 'complete' && (
               <div className={`media-status ${job.status === 'failed' ? 'failed' : ''}`}>
@@ -146,6 +163,7 @@ export default function App() {
             )}
             <VideoPlayer
               job={playable}
+              season={season}
               src={videoSrc}
               tracks={match.tracks}
               events={match.events}
@@ -182,6 +200,7 @@ export default function App() {
             {analysisComplete && tab === 'timeline' && (
               <Timeline
                 job={playable}
+                season={season}
                 events={match.events}
                 confidenceThreshold={confidenceThreshold}
                 currentTime={currentTime}
@@ -199,10 +218,10 @@ export default function App() {
               />
             )}
             {analysisComplete && tab === 'heatmap' && (
-              <HeatMap events={match.events} selectedTeam={selectedTeam} />
+              <HeatMap season={season} events={match.events} selectedTeam={selectedTeam} />
             )}
             {analysisComplete && tab === 'accuracy' && (
-              <AccuracyPanel accuracy={match.accuracy} fromRaw />
+              <AccuracyPanel accuracy={match.accuracy} season={season} fromRaw />
             )}
             {analysisComplete && tab === 'export' && <ExportPanel matchIds={matchIds} />}
           </>
@@ -223,6 +242,8 @@ export default function App() {
           onPatch={match.patchEvent}
           onDelete={match.removeEvent}
           onCreate={match.addEvent}
+          tracks={match.tracks}
+          onPatchTrack={(trackId, team) => match.patchTrack(job.jobId, trackId, team)}
         />
       )}
     </div>

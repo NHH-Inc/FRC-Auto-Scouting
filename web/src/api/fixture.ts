@@ -1,13 +1,10 @@
-// The fixture client.
+// The fixture client, SCHEMA_VERSION 2.
 //
 // Doc 0: "Component 3 builds the whole UI against fixture data with no backend running."
-// This implements the same ScoutingApi as the HTTP client, backed by /fixtures/. It is not
-// a mock in the testing sense -- it serves the real golden data, so anything that renders
-// here renders against component 2 too.
-//
-// It also fakes the parts of the system that are inherently stateful: a job queue that
-// advances through statuses, and a corrections layer stacked on top of the raw events. The
-// raw events are never mutated, which is the same rule the real database follows.
+// Same ScoutingApi as the HTTP client, backed by /fixtures/. Not a mock in the testing sense
+// -- it serves the real golden data, so anything that renders here renders against
+// component 2 too. It loads all three fixture jobs, including the awkward ones (a match with
+// no TBA data, and a failed download carrying an error_code).
 
 import {
   ViolationLog,
@@ -16,6 +13,7 @@ import {
   parseEvent,
   parseJob,
   parseTrack,
+  SCHEMA_VERSION,
   type Correction,
   type Job,
   type ScoutEvent,
@@ -25,8 +23,9 @@ import {
   type WireJob,
   type WireTrack,
 } from '../contracts';
-import { applyCorrections } from '../lib/corrections';
-import { accuracyReport, computeTeamStats } from '../lib/stats';
+import { applyCorrections, applyTrackCorrections } from '../lib/corrections';
+import { computeTeamStats, reconstructScore } from '../lib/stats';
+import { seasonConfig, type SeasonConfig } from '../season';
 import {
   ApiError,
   type CreateJobInput,
@@ -34,143 +33,148 @@ import {
   type ExportInput,
   type Parsed,
   type ScoutingApi,
+  type TracksResponse,
 } from './index';
-import type { Accuracy, ExportResult, TeamStatsSummary } from './shapes';
+import {
+  parseRunResult,
+  type Accuracy,
+  type ExportResult,
+  type RunResult,
+  type TeamStatsSummary,
+  type WireRunResult,
+} from './shapes';
 
 /** Vite serves /fixtures as its publicDir, so the golden set is at the site root. */
-const FIXTURE_ROOT =
-  (import.meta.env.VITE_FIXTURE_ROOT as string | undefined) ?? '/2026casf_qm42';
-const FIXTURE_MATCH = '2026casf_qm42';
-const CORRECTIONS_KEY = 'frc-scouting.fixture-corrections.v1';
+const FIXTURE_DIRS = ['2026casf_qm42', '2026casf_qm43_no_tba', 'failed_download'];
+const MAIN_FIXTURE = '2026casf_qm42';
+const CORRECTIONS_KEY = 'frc-scouting.fixture-corrections.v2';
 
-async function loadJson<T>(name: string): Promise<T> {
-  const url = `${FIXTURE_ROOT}/${name}`;
+interface Bundle {
+  job: Job;
+  events: ScoutEvent[];
+  tracks: Track[];
+  result: RunResult | null;
+}
+
+async function loadJson<T>(dir: string, name: string): Promise<T> {
+  const url = `/${dir}/${name}`;
   const res = await fetch(url);
-  if (!res.ok) throw new ApiError(`Fixture ${name} not found`, res.status, url);
+  if (!res.ok) throw new ApiError(`Fixture ${dir}/${name} not found`, res.status, url);
   return (await res.json()) as T;
 }
 
-async function loadJsonl<T>(name: string): Promise<T[]> {
-  const url = `${FIXTURE_ROOT}/${name}`;
+async function loadJsonl<T>(dir: string, name: string): Promise<T[]> {
+  const url = `/${dir}/${name}`;
   const res = await fetch(url);
-  if (!res.ok) throw new ApiError(`Fixture ${name} not found`, res.status, url);
+  if (!res.ok) throw new ApiError(`Fixture ${dir}/${name} not found`, res.status, url);
   const text = await res.text();
-  return text
-    .split('\n')
-    .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as T);
+  return text.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l) as T);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Statuses a simulated job walks through, with how long it lingers in each. */
-const PIPELINE: Array<[Job['status'], number]> = [
-  ['queued', 1200],
-  ['downloading', 4000],
-  ['downloaded', 800],
-  ['analyzing', 6000],
-  ['complete', 0],
+const PIPELINE: Array<[Job['status'], Job['stage'], number]> = [
+  ['queued', null, 1000],
+  ['downloading', 'downloading', 3500],
+  ['downloaded', null, 700],
+  ['analyzing', 'detecting', 2000],
+  ['analyzing', 'tracking', 2000],
+  ['analyzing', 'events', 1500],
+  ['complete', null, 0],
 ];
 
 export class FixtureApi implements ScoutingApi {
   readonly mode = 'fixture' as const;
 
   private jobs: Job[] = [];
-  private rawEvents: ScoutEvent[] | null = null;
-  private tracks: Track[] | null = null;
+  private bundles = new Map<string, Bundle>(); // by match_id
   private corrections: Correction[] = [];
-  private violations: ViolationLog = new ViolationLog();
-  private seeded = false;
-  private manualSeq = 0;
+  private shippedCorrections = 0;
+  private violations = new ViolationLog();
+  // A promise, not a boolean. useMatch fires four calls concurrently; a flag set before
+  // the awaits complete lets the other three skip seeding and read empty state.
+  private seeding: Promise<void> | null = null;
 
-  // ---- loading
+  private seed(): Promise<void> {
+    this.seeding ??= this.loadAll();
+    return this.seeding;
+  }
 
-  private async seed(): Promise<void> {
-    if (this.seeded) return;
-    this.seeded = true;
-
-    const [wireJob, wireEvents, wireTracks] = await Promise.all([
-      loadJson<WireJob>('job.json'),
-      loadJsonl<WireEvent>('events.jsonl'),
-      loadJsonl<WireTrack>('tracks.jsonl'),
-    ]);
-
+  private async loadAll(): Promise<void> {
     const log = new ViolationLog();
-    const job = parseJob(wireJob, log);
-    if (!job) throw new ApiError('Fixture job.json failed contract validation', 500, FIXTURE_ROOT);
 
-    this.rawEvents = wireEvents
-      .map((e) => parseEvent(e, log))
-      .filter((e): e is ScoutEvent => e !== null)
-      .sort((a, b) => a.tSeconds - b.tSeconds);
-    this.tracks = wireTracks
-      .map((t) => parseTrack(t, log))
-      .filter((t): t is Track => t !== null);
+    for (const dir of FIXTURE_DIRS) {
+      const wireJob = await loadJson<WireJob>(dir, 'job.json');
+      const job = parseJob(wireJob, log);
+      if (!job) continue;
+      this.jobs.push(job);
+
+      // A failed job never produced analysis output.
+      if (job.status === 'failed' || !job.matchId) continue;
+
+      const [wireEvents, wireTracks, wireResult] = await Promise.all([
+        loadJsonl<WireEvent>(dir, 'events.jsonl'),
+        loadJsonl<WireTrack>(dir, 'tracks.jsonl'),
+        loadJson<WireRunResult>(dir, 'result.json'),
+      ]);
+      this.bundles.set(job.matchId, {
+        job,
+        events: wireEvents
+          .map((e) => parseEvent(e, log))
+          .filter((e): e is ScoutEvent => e !== null)
+          .sort((a, b) => a.tSeconds - b.tSeconds),
+        tracks: wireTracks.map((t) => parseTrack(t, log)).filter((t): t is Track => t !== null),
+        result: parseRunResult(wireResult),
+      });
+
+      try {
+        const wire = await loadJsonl<WireCorrection>(dir, 'corrections.jsonl');
+        this.corrections.push(
+          ...wire.map((c) => parseCorrection(c, log)).filter((c): c is Correction => c !== null)
+        );
+      } catch {
+        // corrections.jsonl is optional
+      }
+    }
+    this.shippedCorrections = this.corrections.length;
     this.violations = log;
 
-    // Corrections ship with the fixture; anything the user does this session stacks on top
-    // and survives a refresh so a half-finished review is not lost.
-    try {
-      const wire = await loadJsonl<WireCorrection>('corrections.jsonl');
-      this.corrections = wire
-        .map((c) => parseCorrection(c, log))
-        .filter((c): c is Correction => c !== null);
-    } catch {
-      this.corrections = [];
-    }
     try {
       const saved = localStorage.getItem(CORRECTIONS_KEY);
-      if (saved) this.corrections = [...this.corrections, ...(JSON.parse(saved) as Correction[])];
+      if (saved) this.corrections.push(...(JSON.parse(saved) as Correction[]));
     } catch {
       // private window, or storage disabled -- session-only corrections are fine
     }
-
-    // A queue with something in every interesting state, so the sidebar is not empty and
-    // the retry path is reachable without waiting for a real failure.
-    this.jobs = [
-      job,
-      {
-        ...job,
-        jobId: '7c19e5b2-4a3f-4d81-9e02-6b5c8f1a2d47',
-        matchId: '2026casf_qm43',
-        videoId: 'kJQP7kiw5Fk',
-        status: 'analyzing',
-        progress: 0.42,
-        stage: 'tracking',
-        tbaScore: null,
-      },
-      {
-        ...job,
-        jobId: 'b3f0a71c-9d24-4e6a-8c15-0f7b2e9d4a83',
-        matchId: '2026casf_qm44',
-        videoId: 'M7lc1UVf-VE',
-        status: 'failed',
-        error: 'yt-dlp: HTTP Error 403: Forbidden (format 137 unavailable, try updating yt-dlp)',
-        tbaScore: null,
-      },
-      {
-        ...job,
-        jobId: 'd8e2c460-1b73-4f9a-a5d8-3c6e0b1f7a29',
-        matchId: null,
-        videoId: '9bZkp7q19f0',
-        status: 'queued',
-        tbaScore: null,
-      },
-    ];
   }
 
   private persist() {
     try {
-      const shipped = 3; // the three that come from corrections.jsonl
-      localStorage.setItem(CORRECTIONS_KEY, JSON.stringify(this.corrections.slice(shipped)));
+      localStorage.setItem(
+        CORRECTIONS_KEY,
+        JSON.stringify(this.corrections.slice(this.shippedCorrections))
+      );
     } catch {
       // non-fatal
     }
   }
 
-  private async events(): Promise<ScoutEvent[]> {
-    await this.seed();
-    return this.rawEvents ?? [];
+  private forMatch(matchId: string): Bundle | null {
+    return this.bundles.get(matchId) ?? null;
+  }
+
+  private correctionsFor(matchId: string): Correction[] {
+    const bundle = this.forMatch(matchId);
+    if (!bundle) return [];
+    const eventIds = new Set(bundle.events.map((e) => e.eventId));
+    return this.corrections.filter(
+      (c) =>
+        (c.scope === 'track' && c.jobId === bundle.job.jobId) ||
+        (c.scope === 'event' && (eventIds.has(c.targetId) || c.jobId === bundle.job.jobId))
+    );
+  }
+
+  private configFor(job: Job | undefined): SeasonConfig | null {
+    return job ? seasonConfig(job.season) : null;
   }
 
   // ---- jobs
@@ -188,17 +192,21 @@ export class FixtureApi implements ScoutingApi {
   async createJob(input: CreateJobInput): Promise<Parsed<Job>> {
     await this.seed();
     const template = this.jobs[0];
-    const videoId = extractId(input.url) ?? 'dQw4w9WgXcQ';
+    const now = new Date().toISOString();
     const job: Job = {
       ...template,
       jobId: uuid(),
       matchId: input.matchId ?? null,
-      videoId,
+      season: input.season ?? template.season,
+      videoId: extractId(input.url) ?? template.videoId,
       status: 'queued',
-      progress: 0,
       stage: null,
+      progress: null,
+      errorCode: null,
       error: null,
-      createdAt: new Date().toISOString(),
+      attempt: 1,
+      createdAt: now,
+      updatedAt: now,
     };
     this.jobs = [job, ...this.jobs];
     void this.advance(job.jobId);
@@ -207,18 +215,18 @@ export class FixtureApi implements ScoutingApi {
 
   /** Walk a simulated job through the pipeline so the queue UI has something to show. */
   private async advance(jobId: string): Promise<void> {
-    for (const [status, dwell] of PIPELINE) {
+    for (const [status, stage, dwell] of PIPELINE) {
       await sleep(dwell);
       const i = this.jobs.findIndex((j) => j.jobId === jobId);
       if (i < 0) return; // deleted mid-flight
-      const progress = status === 'analyzing' || status === 'downloading' ? 0 : null;
       this.jobs[i] = {
         ...this.jobs[i],
         status,
-        progress,
-        stage: status === 'analyzing' ? 'tracking' : status === 'downloading' ? 'yt-dlp' : null,
-        // Only the fixture match has real data behind it.
-        matchId: status === 'complete' ? (this.jobs[i].matchId ?? FIXTURE_MATCH) : this.jobs[i].matchId,
+        stage,
+        progress: stage ? Math.round(Math.random() * 80 + 10) / 100 : null,
+        updatedAt: new Date().toISOString(),
+        matchId:
+          status === 'complete' ? (this.jobs[i].matchId ?? MAIN_FIXTURE) : this.jobs[i].matchId,
       };
       this.jobs = [...this.jobs];
     }
@@ -229,21 +237,44 @@ export class FixtureApi implements ScoutingApi {
     this.jobs = this.jobs.filter((j) => j.jobId !== jobId);
   }
 
-  async retryJob(job: Job): Promise<Parsed<Job>> {
-    return this.createJob({
-      url: `https://www.youtube.com/watch?v=${job.videoId}${job.startOffset > 0 ? `&t=${job.startOffset}s` : ''}`,
-      matchId: job.matchId,
-    });
+  async retryJob(jobId: string): Promise<Parsed<Job>> {
+    await this.seed();
+    const i = this.jobs.findIndex((j) => j.jobId === jobId);
+    if (i < 0) throw new ApiError(`No job ${jobId}`, 404, '/jobs');
+    // Doc 0: retry REUSES the job id and increments attempt. A new job would orphan history.
+    this.jobs[i] = {
+      ...this.jobs[i],
+      status: 'queued',
+      stage: null,
+      progress: null,
+      errorCode: null,
+      error: null,
+      attempt: this.jobs[i].attempt + 1,
+      updatedAt: new Date().toISOString(),
+    };
+    this.jobs = [...this.jobs];
+    const job = this.jobs[i];
+    void this.advance(jobId);
+    return { data: job, violations: [] };
+  }
+
+  async getResult(jobId: string): Promise<RunResult | null> {
+    await this.seed();
+    for (const bundle of this.bundles.values()) {
+      if (bundle.job.jobId === jobId) return bundle.result;
+    }
+    return null;
   }
 
   // ---- match data
 
   async getEvents(matchId: string, query: EventQuery = {}): Promise<Parsed<ScoutEvent[]>> {
-    const raw = await this.events();
-    if (matchId !== FIXTURE_MATCH) return { data: [], violations: [] };
+    await this.seed();
+    const bundle = this.forMatch(matchId);
+    if (!bundle) return { data: [], violations: [] };
     const base = query.raw
-      ? raw
-      : (applyCorrections(raw, this.corrections) as ScoutEvent[]);
+      ? bundle.events
+      : applyCorrections(bundle.events, this.correctionsFor(matchId));
     const min = query.minConfidence ?? 0;
     return {
       data: base.filter((e) => e.confidence >= min),
@@ -251,136 +282,208 @@ export class FixtureApi implements ScoutingApi {
     };
   }
 
-  async getTracks(matchId: string): Promise<Parsed<Track[]>> {
+  async getTracks(matchId: string, query: EventQuery = {}): Promise<Parsed<TracksResponse>> {
     await this.seed();
-    if (matchId !== FIXTURE_MATCH) return { data: [], violations: [] };
-    return { data: this.tracks ?? [], violations: [] };
-  }
-
-  async getAccuracy(matchId: string): Promise<Accuracy> {
-    const { data } = await this.getEvents(matchId, { raw: true });
-    const job = this.jobs.find((j) => j.matchId === matchId) ?? this.jobs[0];
-    const report = accuracyReport(data, job?.alliances ?? null, job?.tbaScore ?? null);
+    const bundle = this.forMatch(matchId);
+    if (!bundle) return { data: { boxSampleRate: 0, tracks: [] }, violations: [] };
+    // A track-scoped correction has to reach the tracks too, or the overlay keeps the old
+    // label even though every event was re-attributed.
+    const tracks = query.raw
+      ? bundle.tracks
+      : applyTrackCorrections(bundle.tracks, this.correctionsFor(matchId));
     return {
-      matchId,
-      reconstructed: report.reconstructed,
-      tba: report.tba,
-      delta: report.delta,
+      data: { boxSampleRate: bundle.result?.boxSampleRate ?? 0, tracks },
+      violations: [],
     };
   }
 
   async getCorrections(matchId: string): Promise<Parsed<Correction[]>> {
     await this.seed();
-    if (matchId !== FIXTURE_MATCH) return { data: [], violations: [] };
-    return { data: [...this.corrections], violations: [] };
+    return { data: this.correctionsFor(matchId), violations: [] };
+  }
+
+  async getAccuracy(matchId: string): Promise<Accuracy> {
+    await this.seed();
+    const bundle = this.forMatch(matchId);
+    // Scored from RAW output: the corrected stream would measure the reviewers, not the model.
+    const { data } = await this.getEvents(matchId, { raw: true });
+    const cfg = this.configFor(bundle?.job);
+    const reconstructed = cfg
+      ? reconstructScore(data, bundle?.job.alliances ?? null, cfg)
+      : { red: 0, blue: 0 };
+    const tba = bundle?.job.tbaScore ?? null;
+    return {
+      matchId,
+      tbaAvailable: tba != null,
+      reconstructed,
+      tba,
+      delta: tba
+        ? { red: reconstructed.red - tba.red, blue: reconstructed.blue - tba.blue }
+        : null,
+    };
   }
 
   // ---- corrections
 
-  async createEvent(event: Omit<ScoutEvent, 'eventId'>): Promise<Parsed<ScoutEvent>> {
+  async createEvent(
+    event: Omit<ScoutEvent, 'eventId' | 'corrected' | 'correctionId'>
+  ): Promise<Parsed<ScoutEvent>> {
     await this.seed();
-    const eventId = `${event.jobId.slice(0, 8)}-m${String(++this.manualSeq).padStart(3, '0')}`;
-    const created: ScoutEvent = { ...event, eventId, source: 'manual' };
-    this.corrections.push({
-      correctionId: uuid(),
+    const eventId = uuid();
+    const correctionId = uuid();
+    const created: ScoutEvent = {
+      ...event,
       eventId,
+      source: 'manual',
+      corrected: true,
+      correctionId,
+    };
+    this.corrections.push({
+      correctionId,
+      scope: 'event',
+      jobId: event.jobId,
+      targetId: eventId,
       action: 'create',
       fields: created,
       createdAt: new Date().toISOString(),
+      createdBy: 'local',
     });
     this.persist();
     const log = new ViolationLog();
-    const parsed = parseEvent(eventToWire(created), log);
+    const parsed = parseEvent({ ...eventToWire(created), schema_version: SCHEMA_VERSION }, log);
     if (!parsed) throw new ApiError('Manual event failed contract validation', 400, '/events');
-    return { data: parsed, violations: log.items };
+    return { data: { ...parsed, corrected: true, correctionId }, violations: log.items };
+  }
+
+  private bundleForEvent(eventId: string): Bundle | undefined {
+    return [...this.bundles.values()].find(
+      (b) =>
+        b.events.some((e) => e.eventId === eventId) ||
+        this.corrections.some((c) => c.targetId === eventId && c.jobId === b.job.jobId)
+    );
   }
 
   async patchEvent(eventId: string, fields: Partial<ScoutEvent>): Promise<Parsed<ScoutEvent>> {
     await this.seed();
+    const bundle = this.bundleForEvent(eventId);
     this.corrections.push({
       correctionId: uuid(),
-      eventId,
+      scope: 'event',
+      jobId: bundle?.job.jobId ?? null,
+      targetId: eventId,
       action: 'edit',
       fields,
       createdAt: new Date().toISOString(),
+      createdBy: 'local',
     });
     this.persist();
-    const corrected = applyCorrections(this.rawEvents ?? [], this.corrections);
-    const found = corrected.find((e) => e.eventId === eventId);
+    if (!bundle?.job.matchId) throw new ApiError(`No event ${eventId}`, 404, '/events');
+    const { data } = await this.getEvents(bundle.job.matchId);
+    const found = data.find((e) => e.eventId === eventId);
     if (!found) throw new ApiError(`No event ${eventId}`, 404, '/events');
     return { data: found, violations: [] };
   }
 
   async deleteEvent(eventId: string): Promise<void> {
     await this.seed();
+    const bundle = this.bundleForEvent(eventId);
     this.corrections.push({
       correctionId: uuid(),
-      eventId,
+      scope: 'event',
+      jobId: bundle?.job.jobId ?? null,
+      targetId: eventId,
       action: 'delete',
       fields: null,
       createdAt: new Date().toISOString(),
+      createdBy: 'local',
     });
     this.persist();
   }
 
-  /** Drop every correction made in this browser. Fixture-only; there is no such API call. */
-  async resetCorrections(): Promise<void> {
+  async patchTrack(jobId: string, trackId: number, fields: { team: number | null }): Promise<void> {
     await this.seed();
-    this.corrections = this.corrections.slice(0, 3);
-    try {
-      localStorage.removeItem(CORRECTIONS_KEY);
-    } catch {
-      // non-fatal
-    }
+    // One action re-attributes the track AND every event on it -- doc 3's primary path.
+    this.corrections.push({
+      correctionId: uuid(),
+      scope: 'track',
+      jobId,
+      targetId: String(trackId),
+      action: 'edit',
+      fields: { team: fields.team },
+      createdAt: new Date().toISOString(),
+      createdBy: 'local',
+    });
+    this.persist();
+  }
+
+  async deleteCorrection(correctionId: string): Promise<void> {
+    await this.seed();
+    this.corrections = this.corrections.filter((c) => c.correctionId !== correctionId);
+    this.persist();
   }
 
   // ---- stats and export
 
-  async getTeamStats(team: number, eventKey?: string): Promise<TeamStatsSummary> {
-    const { data } = await this.getEvents(FIXTURE_MATCH);
-    const job = this.jobs[0];
-    const alliance = job?.alliances?.red.includes(team)
-      ? ('red' as const)
-      : job?.alliances?.blue.includes(team)
-        ? ('blue' as const)
-        : null;
-    const s = computeTeamStats(team, data, alliance);
+  async getTeamStats(
+    team: number,
+    eventKey?: string,
+    minConfidence = 0
+  ): Promise<TeamStatsSummary> {
+    await this.seed();
+    let events: ScoutEvent[] = [];
+    let played = 0;
+    let cfg: SeasonConfig | null = null;
+    for (const bundle of this.bundles.values()) {
+      if (!bundle.job.matchId) continue;
+      if (eventKey && !bundle.job.matchId.startsWith(`${eventKey}_`)) continue;
+      const { data } = await this.getEvents(bundle.job.matchId, { minConfidence });
+      if (data.some((e) => e.team === team)) played++;
+      events = events.concat(data);
+      cfg = cfg ?? this.configFor(bundle.job);
+    }
+    const s = computeTeamStats(team, events, null, cfg, minConfidence);
     return {
       team,
       eventKey: eventKey ?? null,
-      matchesPlayed: 1,
+      minConfidence,
+      matchesPlayed: played,
+      cycles: s.cycleCount,
+      avgCycleSeconds: s.medianCycleSeconds,
       shotAttempts: s.shotAttempts,
       shotsMade: s.shotsMade,
-      accuracy: s.accuracy,
+      shotAccuracy: s.accuracy,
+      avgShotIntervalSeconds: s.avgShotIntervalSeconds,
       reloads: s.reloads,
-      cycleCount: s.cycleCount,
-      medianCycleSeconds: s.medianCycleSeconds,
-      bestCycleSeconds: s.bestCycleSeconds,
       defenseSeconds: s.defenseSeconds,
       immobileSeconds: s.immobileSeconds,
       fouls: s.fouls,
-      pointsContributed: s.pointsContributed,
+      lowConfidenceEvents: s.lowConfidenceEvents,
     };
   }
 
   async exportSheets(input: ExportInput): Promise<ExportResult> {
     await this.seed();
-    await sleep(700);
-    const { data } = await this.getEvents(FIXTURE_MATCH);
-    const teams = new Set(data.map((e) => e.team).filter((t): t is number => t != null));
-    const rows = input.mode === 'raw' ? data.length : teams.size * input.matchIds.length;
+    await sleep(600);
+    let rows = 0;
+    for (const matchId of input.matchIds) {
+      const { data } = await this.getEvents(matchId);
+      rows +=
+        input.mode === 'raw'
+          ? data.length
+          : new Set(data.map((e) => e.team).filter((t): t is number => t != null)).size;
+    }
     return {
       spreadsheetId: '1FIXTUREsheetIdNotARealSpreadsheet',
       spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/1FIXTUREsheetIdNotARealSpreadsheet',
-      rowsWritten: rows,
-      // Doc 3 wants re-export idempotent: a second run updates rather than appends.
-      rowsUpdated: 0,
       mode: input.mode,
+      rowsWritten: rows,
+      rowsSkipped: 0,
     };
   }
 
   videoUrl(_job: Job): string {
-    return `${FIXTURE_ROOT}/segment.mp4`;
+    // Only the main fixture ships a real segment.
+    return `/${MAIN_FIXTURE}/segment.mp4`;
   }
 }
 

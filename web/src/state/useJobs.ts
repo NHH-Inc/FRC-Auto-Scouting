@@ -83,7 +83,8 @@ export function useJobs(pollMs = 1500) {
   const retryJob = useCallback(
     async (job: Job) => {
       const api = await getApi();
-      const { data } = await api.retryJob(job);
+      // v2: retry reuses the job id and increments attempt.
+      const { data } = await api.retryJob(job.jobId);
       await load();
       return data;
     },

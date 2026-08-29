@@ -16,7 +16,7 @@ shared surface and nothing in `/contracts/` changes without all three people agr
 | `analysis/` | 1 | C++ | Detection, tracking, OCR, event extraction |
 | `ingest/` | 2 | Python | yt-dlp, TBA/YouTube APIs, job queue, HTTP API, the database |
 | `web/` | 3 | TypeScript | UI, player, overlay, corrections, Sheets export |
-| `contracts/` | — | — | Shared schemas. **Owned by everyone.** |
+| `contracts/` | — | — | Shared schemas + per-year season configs. **Owned by everyone.** |
 | `fixtures/` | — | — | Golden test data. **Owned by everyone.** |
 | `docs/` | — | — | The four context documents |
 
@@ -24,8 +24,8 @@ shared surface and nothing in `/contracts/` changes without all three people agr
 
 1. `docs/frc-scouting-0-contract.md` — read before anything else
 2. `contracts/README.md` — the schemas, and what changed when the three contract sets merged
-3. `contracts/OPEN_QUESTIONS.md` — **thirteen items that need all three people.** Several
-   will break the integration if they are not settled
+3. `contracts/OPEN_QUESTIONS.md` — all thirteen v1 questions are resolved in
+   SCHEMA_VERSION 2; this is where the next one gets raised
 4. `fixtures/README.md` — the one worked example every component builds against
 
 ## Running component 3 with no backend
