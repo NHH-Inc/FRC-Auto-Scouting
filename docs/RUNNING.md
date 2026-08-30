@@ -36,6 +36,13 @@ rather than to your shell.
 stray `web\ingest\` folder if a previous attempt made one. `full` writes `web\.env.local` for
 you — that file is not in the repo, which is why you did not have it.
 
+If the Windows C++ dependency setup is running in the background, open a second PowerShell in
+REPO and run this to see a live progress bar (for example, `6/40` packages):
+
+```bash
+.\run.ps1 native-progress
+```
+
 The rest of this document is what those commands do, for when something goes wrong.
 
 ---

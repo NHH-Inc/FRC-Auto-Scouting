@@ -16,12 +16,13 @@
     .\run.ps1 full      Ingest + web together, wired to each other.
     .\run.ps1 serve     Build the UI and serve everything from ONE port. For competitions.
     .\run.ps1 doctor    What is installed and what is missing.
+    .\run.ps1 native-progress  Live progress bar for the Windows C++ dependency setup.
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('setup', 'check', 'web', 'api', 'full', 'serve', 'doctor', 'help')]
+    [ValidateSet('setup', 'check', 'web', 'api', 'full', 'serve', 'doctor', 'native-progress', 'help')]
     [string]$Command = 'help'
 )
 
@@ -55,6 +56,62 @@ function Require-Venv {
     if (-not (Test-Path $VenvPy)) {
         Bad "No Python venv. Run: .\run.ps1 setup"
         exit 1
+    }
+}
+
+# --------------------------------------------------------------------------- native progress
+
+function Get-NativeInstallProgress {
+    # Parse vcpkg's real package counter rather than guessing from elapsed time.
+    $logPath = Join-Path ([System.IO.Path]::GetTempPath()) 'frc-vcpkg-install.log'
+    if (-not (Test-Path $logPath)) { return $null }
+
+    $line = Get-Content -LiteralPath $logPath -Tail 250 -ErrorAction SilentlyContinue |
+        Where-Object { $_ -match 'Installing\s+(\d+)\/(\d+)\s+' } |
+        Select-Object -Last 1
+    if (-not $line -or $line -notmatch 'Installing\s+(\d+)\/(\d+)\s+') { return $null }
+
+    return [pscustomobject]@{
+        Current = [int]$Matches[1]
+        Total = [int]$Matches[2]
+        Detail = ($line -replace '^.*Installing\s+\d+\/\d+\s+', '')
+        LogPath = $logPath
+    }
+}
+
+function Invoke-NativeProgress {
+    $logPath = Join-Path ([System.IO.Path]::GetTempPath()) 'frc-vcpkg-install.log'
+    $sawInstaller = $false
+
+    while ($true) {
+        $progress = Get-NativeInstallProgress
+        $installer = Get-Process -Name vcpkg -ErrorAction SilentlyContinue
+        if ($installer) { $sawInstaller = $true }
+
+        if ($progress) {
+            $percent = [math]::Min(100, [math]::Round((100 * $progress.Current) / $progress.Total))
+            Write-Progress -Activity 'Installing C++ video-analysis dependencies' `
+                -Status "$($progress.Current)/$($progress.Total): $($progress.Detail)" `
+                -PercentComplete $percent
+        }
+        elseif ($installer) {
+            Write-Progress -Activity 'Installing C++ video-analysis dependencies' `
+                -Status 'Preparing the dependency list...' -PercentComplete 0
+        }
+        elseif ($sawInstaller) {
+            Write-Progress -Activity 'Installing C++ video-analysis dependencies' -Completed
+            Say 'Native dependency installer stopped.' 'Green'
+            Write-Host "    See the final output at: $logPath"
+            Write-Host '    Next: run the CMake build command in docs\RUNNING.md.'
+            return
+        }
+        else {
+            Warn 'No vcpkg installer is running and no progress log was found.'
+            Write-Host '    Start the Windows native setup first; see docs\RUNNING.md.'
+            return
+        }
+
+        Start-Sleep -Seconds 2
     }
 }
 
@@ -359,6 +416,7 @@ switch ($Command) {
     'full'   { Invoke-Full }
     'serve'  { Invoke-Serve }
     'doctor' { Invoke-Doctor }
+    'native-progress' { Invoke-NativeProgress }
     default {
         Write-Host @'
 FRC Video Scouting
@@ -372,6 +430,7 @@ FRC Video Scouting
   .\run.ps1 serve     Build the UI and serve it all on one port. For competitions.
 
   .\run.ps1 check     Everything CI runs. Do this before pushing.
+  .\run.ps1 native-progress  Live bar for a running Windows C++ dependency install.
 
 Run it from anywhere -- paths resolve relative to the script, not your shell.
 Full guide: docs\RUNNING.md
