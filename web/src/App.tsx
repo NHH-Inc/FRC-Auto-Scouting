@@ -8,12 +8,14 @@ import { Sidebar } from './components/Sidebar';
 import { VideoPlayer } from './player/VideoPlayer';
 import { useJobs } from './state/useJobs';
 import { useMatch } from './state/useMatch';
+import { useRunResult } from './state/useRunResult';
 import { AccuracyPanel } from './views/Accuracy';
+import { AnalysisPanel } from './views/Analysis';
 import { HeatMap } from './views/HeatMap';
 import { TeamStats } from './views/TeamStats';
 import { Timeline } from './views/Timeline';
 
-type Tab = 'timeline' | 'teams' | 'heatmap' | 'accuracy' | 'export';
+type Tab = 'timeline' | 'analysis' | 'teams' | 'heatmap' | 'accuracy' | 'export';
 type VideoAlignment = 'segment' | 'original';
 type VideoSource = 'job' | 'stream' | 'local';
 
@@ -24,6 +26,7 @@ interface LocalVideo {
 
 const TABS: Array<[Tab, string]> = [
   ['timeline', 'Timeline'],
+  ['analysis', 'Analysis'],
   ['teams', 'Team stats'],
   ['heatmap', 'Heat map'],
   ['accuracy', 'Accuracy'],
@@ -113,6 +116,7 @@ export default function App() {
   // earlier, so do not issue empty analysis requests while a job is still moving.
   const analysisComplete = job?.status === 'complete';
   const match = useMatch(job?.matchId ?? null, analysisComplete);
+  const runResult = useRunResult(job?.jobId ?? null, Boolean(analysisComplete));
 
   // A complete job whose media metadata never arrived cannot drive a player -- rather than
   // defaulting a duration and drawing a wrong scrub bar, the stage says so.
@@ -339,6 +343,13 @@ export default function App() {
                 selectedEventId={selectedEventId}
                 onSelectEvent={setSelectedEventId}
                 onSeek={seek}
+              />
+            )}
+            {analysisComplete && tab === 'analysis' && (
+              <AnalysisPanel
+                result={runResult.result}
+                loading={runResult.loading}
+                error={runResult.error}
               />
             )}
             {analysisComplete && tab === 'teams' && (

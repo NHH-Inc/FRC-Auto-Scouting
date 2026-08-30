@@ -16,6 +16,7 @@
     .\run.ps1 full      Ingest + web together, wired to each other.
     .\run.ps1 serve     Build the UI and serve everything from ONE port. For competitions.
     .\run.ps1 doctor    What is installed and what is missing.
+    .\run.ps1 db-check  Safely test the configured SQLite or Supabase database.
     .\run.ps1 native-setup     Start the Windows C++ dependency setup in the background.
     .\run.ps1 native-progress  Live progress bar for the Windows C++ dependency setup.
 #>
@@ -23,7 +24,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('setup', 'check', 'web', 'api', 'full', 'serve', 'doctor', 'native-setup', 'native-progress', 'help')]
+    [ValidateSet('setup', 'check', 'web', 'api', 'full', 'serve', 'doctor', 'db-check', 'native-setup', 'native-progress', 'help')]
     [string]$Command = 'help'
 )
 
@@ -379,6 +380,21 @@ function Invoke-Check {
 
 # --------------------------------------------------------------------------- run
 
+function Invoke-DbCheck {
+    Require-Venv
+    Say 'Database connection'
+    Push-Location $Repo
+    try {
+        $code = Invoke-Native { & $VenvPy -m ingest.db_check }
+        if ($code -ne 0) {
+            Bad 'database connection failed; see docs\CENTRAL-SETUP.md'
+            exit $code
+        }
+        Ok 'database connection and tables'
+    }
+    finally { Pop-Location }
+}
+
 function Invoke-Web {
     Say 'Web app on fixture data  -  http://localhost:5173' 'Green'
     Write-Host '  No backend needed. Ctrl+C to stop.'
@@ -468,6 +484,7 @@ switch ($Command) {
     'full'   { Invoke-Full }
     'serve'  { Invoke-Serve }
     'doctor' { Invoke-Doctor }
+    'db-check' { Invoke-DbCheck }
     'native-setup' { Invoke-NativeSetup }
     'native-progress' { Invoke-NativeProgress }
     default {

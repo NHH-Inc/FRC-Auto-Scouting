@@ -19,6 +19,8 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
+# Must run before database/TBA/Sheets read os.environ. See ingest/settings.py.
+from . import settings  # noqa: F401
 from . import database, downloader, models, orchestrator, sheets, stats, tba
 from .corrections import apply_corrections, apply_track_corrections
 from .serializers import (

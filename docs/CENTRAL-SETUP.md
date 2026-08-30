@@ -70,18 +70,21 @@ Put it in the host's `ingest/.env`:
 DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
 ```
 
-Then install the driver and start the service — the tables create themselves on first run:
+Then install dependencies and verify the connection — the tables create themselves on first run:
 
 ```bash
 # in: REPO
-.\ingest\.venv\Scripts\python -m pip install "psycopg[binary]"
-.\run.ps1 api
+.\run.ps1 setup
+.\run.ps1 db-check
 ```
 
 `psycopg2-binary` is already in `requirements.txt` and also works; use whichever installs cleanly.
+The service now loads `ingest/.env` itself, so this works both through `run.ps1` and a direct
+`uvicorn ingest.main:app` launch. `db-check` only prints the database type and success/failure;
+it never prints the connection string.
 
-Nothing in the code needs changing. `database.py` reads `DATABASE_URL` and only applies the
-SQLite-specific `check_same_thread` argument when the URL starts with `sqlite`.
+`database.py` reads `DATABASE_URL` and only applies the SQLite-specific `check_same_thread`
+argument when the URL starts with `sqlite`.
 
 **Moving existing data across is optional.** The current SQLite database holds whatever test jobs
 you have run; the events in it came from fixtures, not real analysis. Starting clean on Postgres

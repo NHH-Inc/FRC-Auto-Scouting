@@ -189,17 +189,17 @@ else — not in git, not in chat, not in the repo. `.env` is already gitignored.
 DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
 ```
 
-**3.** Install a driver and start the service:
+**3.** Install dependencies and verify the connection:
 
 ```bash
 # in: REPO
-.\ingest\.venv\Scripts\python -m pip install "psycopg[binary]"
-.\run.ps1 api
+.\run.ps1 setup
+.\run.ps1 db-check
 ```
 
-**That's it.** The tables create themselves on first run. **No code changes** — `database.py`
-already reads `DATABASE_URL` and only applies the SQLite-specific argument when the URL starts
-with `sqlite`.
+**That's it.** The tables create themselves on first run. The service automatically loads
+`ingest/.env`, reads `DATABASE_URL`, and only applies the SQLite-specific argument when the URL
+starts with `sqlite`. `db-check` never echoes the password.
 
 **4.** Confirm it worked: <http://localhost:8080/api/health> should return
 `{"status":"ok","schema_version":3,...}`. If the connection string is wrong you will get a

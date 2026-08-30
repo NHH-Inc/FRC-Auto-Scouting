@@ -246,6 +246,25 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .panel-head h2 { font-size: 14px; margin: 0; }
 .panel-head .muted { font-size: 12px; margin-left: auto; }
 
+/* ---------------------------------------------------------------- analysis result */
+
+.analysis-status {
+  margin-left: auto; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px;
+  font-size: 11px; font-family: var(--mono);
+}
+.analysis-status.ready { color: var(--green); border-color: rgba(63, 191, 127, 0.45); }
+.analysis-status.waiting { color: var(--amber); border-color: rgba(232, 185, 59, 0.45); }
+.analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 650px) { .analysis-grid { grid-template-columns: 1fr; } }
+.analysis-metric { padding: 9px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); min-width: 0; }
+.analysis-metric span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 2px; }
+.analysis-metric strong { display: block; font-size: 14px; overflow-wrap: anywhere; }
+.analysis-metric strong.mono { font-family: var(--mono); font-size: 12px; }
+.analysis-callout h2 { margin: 0 0 5px; font-size: 14px; }
+.analysis-callout p { margin: 0; color: var(--muted); max-width: 78ch; }
+.analysis-callout.waiting { border-color: rgba(232, 185, 59, 0.45); background: rgba(232, 185, 59, 0.05); }
+.analysis-callout.warning { border-color: rgba(224, 85, 95, 0.5); background: rgba(224, 85, 95, 0.06); }
+
 /* ---------------------------------------------------------------- timeline */
 
 .timeline-scroll { overflow-x: auto; }
