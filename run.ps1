@@ -16,13 +16,14 @@
     .\run.ps1 full      Ingest + web together, wired to each other.
     .\run.ps1 serve     Build the UI and serve everything from ONE port. For competitions.
     .\run.ps1 doctor    What is installed and what is missing.
+    .\run.ps1 native-setup     Start the Windows C++ dependency setup in the background.
     .\run.ps1 native-progress  Live progress bar for the Windows C++ dependency setup.
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('setup', 'check', 'web', 'api', 'full', 'serve', 'doctor', 'native-progress', 'help')]
+    [ValidateSet('setup', 'check', 'web', 'api', 'full', 'serve', 'doctor', 'native-setup', 'native-progress', 'help')]
     [string]$Command = 'help'
 )
 
@@ -60,6 +61,41 @@ function Require-Venv {
 }
 
 # --------------------------------------------------------------------------- native progress
+
+function Get-NativeVcpkgInstallDir {
+    if (-not $env:VCPKG_ROOT) { return $null }
+    # ONNX Runtime's Windows port mishandles a package install path containing spaces.
+    # Put derived packages under the conventional C:\vcpkg root even when REPO has spaces.
+    return (Join-Path $env:VCPKG_ROOT 'frc-analysis-installed')
+}
+
+function Invoke-NativeSetup {
+    if (-not $env:VCPKG_ROOT) {
+        Bad 'VCPKG_ROOT is not set. Follow the vcpkg step in docs\RUNNING.md first.'
+        exit 1
+    }
+    $vcpkg = Join-Path $env:VCPKG_ROOT 'vcpkg.exe'
+    if (-not (Test-Path $vcpkg)) {
+        Bad "vcpkg.exe was not found at $vcpkg"
+        exit 1
+    }
+    if (Get-Process -Name vcpkg -ErrorAction SilentlyContinue) {
+        Warn 'A vcpkg installation is already running. Use: .\run.ps1 native-progress'
+        return
+    }
+
+    $installDir = Get-NativeVcpkgInstallDir
+    $logPath = Join-Path ([System.IO.Path]::GetTempPath()) 'frc-vcpkg-install.log'
+    $errorLogPath = Join-Path ([System.IO.Path]::GetTempPath()) 'frc-vcpkg-install-error.log'
+    Remove-Item -LiteralPath $logPath, $errorLogPath -Force -ErrorAction SilentlyContinue
+    $process = Start-Process -FilePath $vcpkg -WorkingDirectory $Repo `
+        -ArgumentList 'install', '--x-manifest-root=analysis', "--x-install-root=$installDir", '--triplet', 'x64-windows' `
+        -RedirectStandardOutput $logPath -RedirectStandardError $errorLogPath -WindowStyle Hidden -PassThru
+
+    Say 'Native dependency setup started.' 'Green'
+    Write-Host "    Process: $($process.Id)"
+    Write-Host '    Open another PowerShell and run: .\run.ps1 native-progress'
+}
 
 function Get-NativeInstallProgress {
     # Parse vcpkg's real package counter rather than guessing from elapsed time.
@@ -255,6 +291,7 @@ function Invoke-Check {
                 $vcpkgToolchain = Join-Path $env:VCPKG_ROOT 'scripts\buildsystems\vcpkg.cmake'
                 if (Test-Path $vcpkgToolchain) {
                     $configureArgs += "-DCMAKE_TOOLCHAIN_FILE=$vcpkgToolchain"
+                    $configureArgs += "-DVCPKG_INSTALLED_DIR=$(Get-NativeVcpkgInstallDir)"
                     Ok 'using vcpkg from VCPKG_ROOT'
                 }
                 else { Warn 'VCPKG_ROOT is set but its CMake toolchain was not found' }
@@ -416,6 +453,7 @@ switch ($Command) {
     'full'   { Invoke-Full }
     'serve'  { Invoke-Serve }
     'doctor' { Invoke-Doctor }
+    'native-setup' { Invoke-NativeSetup }
     'native-progress' { Invoke-NativeProgress }
     default {
         Write-Host @'
@@ -430,6 +468,7 @@ FRC Video Scouting
   .\run.ps1 serve     Build the UI and serve it all on one port. For competitions.
 
   .\run.ps1 check     Everything CI runs. Do this before pushing.
+  .\run.ps1 native-setup     Start Windows C++ dependency setup in the background.
   .\run.ps1 native-progress  Live bar for a running Windows C++ dependency install.
 
 Run it from anywhere -- paths resolve relative to the script, not your shell.
