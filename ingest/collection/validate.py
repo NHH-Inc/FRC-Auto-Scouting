@@ -47,9 +47,19 @@ def validate_collection(path: str | Path, *, verify_hashes: bool = True) -> dict
                 errors.append(f"orphan model proposal: {row.get('frame_id')}")
             if row.get("status") != "proposed" or row.get("human_review_required") is not True:
                 errors.append(f"model result is not marked for review: {row.get('frame_id')}")
+    sam3_proposal_count = 0
+    sam3_proposals = collection / "sam3-proposals.jsonl"
+    if sam3_proposals.exists():
+        for row in _rows(sam3_proposals):
+            sam3_proposal_count += 1
+            if row.get("frame_id") not in ids:
+                errors.append(f"orphan SAM 3 proposal: {row.get('frame_id')}")
+            if row.get("status") != "proposed" or row.get("human_review_required") is not True:
+                errors.append(f"SAM 3 result is not marked for review: {row.get('frame_id')}")
     return {
         "valid": not errors,
         "errors": errors,
         "frame_count": len(frames),
         "model_proposal_records": proposal_count,
+        "sam3_proposal_records": sam3_proposal_count,
     }

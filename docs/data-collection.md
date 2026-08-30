@@ -47,6 +47,10 @@ schema for normalized robot boxes. The models are invoked sequentially and unloa
 which prevents the three model weights from competing for memory. No API key is required for the
 default local connection.
 
+SAM 3.1 is an optional, separate CUDA proposal source. It writes `sam3-proposals.jsonl` rather
+than changing this three-model consensus. See [SAM3.md](SAM3.md) for Robert's separate install and
+the `sam3-propose` command.
+
 If the version check fails, start or restart the service:
 
 ```bash
@@ -108,6 +112,7 @@ data/
     model-proposals.jsonl                 raw validated boxes from every model
     model-consensus.jsonl                 boxes supported by at least two models
     model-comparison.json                 per-model and consensus summary
+    sam3-proposals.jsonl                  optional SAM 3.1 text-prompt boxes; review-only
   datasets/                              reserved for immutable reviewed dataset exports
 ```
 
@@ -140,8 +145,8 @@ data/segments/<video>.mp4
   -> model-proposals.jsonl + model-consensus.jsonl
   -> human correction and acceptance
   -> reviewed annotations.jsonl
-  -> future YOLO/other detector export under data/datasets/<dataset-id>/
-  -> detector training and evaluation
+  -> RF-DETR COCO export under data/datasets/<dataset-id>/
+  -> RF-DETR training and evaluation
 ```
 
 Until the annotation import and dataset exporter are implemented, use `model-consensus.jsonl` to

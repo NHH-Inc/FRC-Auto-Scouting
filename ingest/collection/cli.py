@@ -10,6 +10,7 @@ from .config import load_config
 from .coco_export import export_coco_dataset
 from .extractor import extract_collection
 from .ollama_annotator import annotate_collection, build_consensus
+from .sam3_annotator import annotate_collection_sam3
 from .validate import validate_collection
 
 
@@ -32,6 +33,13 @@ def parser() -> argparse.ArgumentParser:
     annotate.add_argument("--models", nargs="+")
     annotate.add_argument("--limit", type=int)
     annotate.add_argument("--force", action="store_true")
+
+    sam3 = commands.add_parser("sam3-propose", help="generate optional SAM 3.1 text-prompt proposals")
+    sam3.add_argument("--collection", required=True)
+    sam3.add_argument("--prompt", default="FRC competition robot")
+    sam3.add_argument("--min-score", type=float, default=0.35)
+    sam3.add_argument("--limit", type=int)
+    sam3.add_argument("--force", action="store_true")
 
     compare = commands.add_parser("compare-models", help="rebuild IoU consensus from proposals")
     compare.add_argument("--collection", required=True)
@@ -69,6 +77,13 @@ def main() -> int:
             threshold=config.iou_threshold, limit=args.limit, force=args.force,
         )
         print(json.dumps({"proposals": str(proposals), "consensus": str(consensus)}))
+        return 0
+    if args.command == "sam3-propose":
+        output = annotate_collection_sam3(
+            collection=args.collection, prompt=args.prompt, min_score=args.min_score,
+            limit=args.limit, force=args.force,
+        )
+        print(json.dumps({"proposals": str(output), "human_review_required": True}))
         return 0
     if args.command == "compare-models":
         config = load_config(args.config)

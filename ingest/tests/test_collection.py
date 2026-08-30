@@ -4,6 +4,7 @@ from pathlib import Path
 
 from ingest.collection.ollama_annotator import compare_frame_proposals
 from ingest.collection.provenance import sha256_file
+from ingest.collection.sam3_annotator import normalise_xyxy_box
 
 
 class CollectionTests(unittest.TestCase):
@@ -28,6 +29,14 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(result[0]["representative_model"], "a")
         self.assertEqual(result[0]["x"], .1)
         self.assertTrue(result[0]["human_review_required"] if "human_review_required" in result[0] else True)
+
+    def test_sam3_box_conversion_is_clamped_and_normalized(self):
+        box = normalise_xyxy_box([-10, 20, 110, 70], .8, width=100, height=100, min_score=.35)
+        self.assertEqual(box["x"], 0.0)
+        self.assertEqual(box["y"], 0.2)
+        self.assertEqual(box["w"], 1.0)
+        self.assertEqual(box["h"], 0.5)
+        self.assertEqual(box["source"], "sam3.1_text")
 
 
 if __name__ == "__main__":

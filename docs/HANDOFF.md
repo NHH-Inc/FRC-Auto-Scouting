@@ -41,6 +41,7 @@ row that is wrong; they have been corrected, but if you find that row anywhere e
 | Web app: player, overlay, corrections, timeline, stats, heat map, export | **works** | Justin |
 | Ingest: yt-dlp, TBA, job queue, database, full Contract E API | **works** | Robert |
 | Ollama labelling ensemble (3 local vision models, IoU consensus) | **works** | Robert |
+| SAM 3.1 text-prompt proposal helper | **optional; separate CUDA environment, needs checkpoint login and real frames** | Robert |
 | Google Sheets export | **works**, needs a service account JSON | Robert |
 | **Analysis backend: detection, tracking, OCR** | **RF-DETR ONNX interface + conservative IoU tracking; needs trained weights** | **Robert** |
 | Human review of auto-labels | **Roboflow handoff documented; needs a project/account and people reviewing** | Robert |
