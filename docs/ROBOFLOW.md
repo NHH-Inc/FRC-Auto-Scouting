@@ -50,6 +50,10 @@ folders, each containing `_annotations.coco.json`. Then the local training comma
 .\training\run_rfdetr.ps1 -Dataset <reviewed-coco-folder> -Output data\models\robot-v1
 ```
 
+The trainer uses RF-DETR's conservative augmentation preset by default: horizontal flips and
+mild image-quality variation. It does not use vertical flips or large rotations, which would
+make unrealistic FRC broadcast frames. The output folder records this in `training-config.json`.
+
 The resulting `onnx\inference_model.onnx` is local model data, not source code. Keep it out of
 Git. Point the ignored `analysis\config\detector.local.json` at it and set
 `FRC_DETECTOR_CONFIG` before launching a real job.

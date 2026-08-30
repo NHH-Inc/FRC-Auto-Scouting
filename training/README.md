@@ -31,8 +31,15 @@ presence makes the temporary quality compromise visible in every training comman
 ```
 
 It uses RF-DETR Small, `640px`, `100` epochs, and `batch-size auto`; RF-DETR picks a safe batch
-for Robert's 12 GB card. The exported file is
+for Robert's 12 GB card. It also uses the upstream **conservative** augmentation preset: horizontal
+flips plus mild brightness/contrast variation, alongside RF-DETR's normal resize/scale jitter.
+It deliberately avoids vertical flips, large rotations and extreme perspective changes because
+those do not resemble FRC broadcast footage. The exported file is
 `data\models\robot-v1\onnx\inference_model.onnx`.
+
+The output folder also records the exact choice in `training-config.json`. For an A/B comparison
+against no optional augmentation, add `-Augmentation none` to the command; do not make that the
+default.
 
 ## 3. Enable C++ inference
 

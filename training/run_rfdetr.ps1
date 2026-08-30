@@ -12,7 +12,8 @@ param(
     [ValidateSet('nano', 'small', 'medium')][string]$Variant = 'small',
     [int]$Epochs = 100,
     [string]$BatchSize = 'auto',
-    [int]$Resolution = 640
+    [int]$Resolution = 640,
+    [ValidateSet('conservative', 'none')][string]$Augmentation = 'conservative'
 )
 
 $Repo = Split-Path -Parent $PSScriptRoot
@@ -29,5 +30,6 @@ if (-not (Test-Path $Python)) {
 & $Python (Join-Path $PSScriptRoot 'train_rfdetr.py') `
     --dataset (Resolve-TrainingPath $Dataset) `
     --output (Resolve-TrainingPath $Output) `
-    --variant $Variant --epochs $Epochs --batch-size $BatchSize --resolution $Resolution
+    --variant $Variant --epochs $Epochs --batch-size $BatchSize --resolution $Resolution `
+    --augmentation $Augmentation
 exit $LASTEXITCODE
