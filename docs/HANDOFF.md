@@ -41,10 +41,10 @@ row that is wrong; they have been corrected, but if you find that row anywhere e
 | Web app: player, overlay, corrections, timeline, stats, heat map, export | **works** | Justin |
 | Ingest: yt-dlp, TBA, job queue, database, full Contract E API | **works** | Robert |
 | Ollama labelling ensemble (3 local vision models, IoU consensus) | **works** | Robert |
-| Google Sheets export | **works**, needs a service account JSON | Justin |
+| Google Sheets export | **works**, needs a service account JSON | Robert |
 | **Analysis backend: detection, tracking, OCR** | **contract surface only — finds nothing** | **Robert** |
-| Human review of auto-labels | **not built** | *nobody* |
-| Detector training | **not built** | *nobody* |
+| Human review of auto-labels | **not built** | Robert |
+| Detector training | **not built** | Robert |
 
 **The critical path is the analysis backend.** Its binary compiles, satisfies Contract D, and
 emits contract-valid output — but there is no detection pipeline inside it, so a real job runs to
@@ -194,20 +194,33 @@ is not ours to decide. Download at home, carry segments in.
 6. `jpeg_quality: 85` instead of 95 roughly halves your frame storage with no meaningful loss for
    detection training. You have 40 GB.
 
+### Robert — also owns everything below, in this order
+
+7. **Google Sheets export.** Create a Google Cloud service account, download its JSON key,
+   share the spreadsheet with the service account's email as **Editor**, and point
+   `GOOGLE_APPLICATION_CREDENTIALS` at the file. Keep that JSON outside the repo. Everything
+   else is done; the tabs are created automatically. Sheet id is already in `ingest/.env`.
+8. **Ask about the classroom machines.** Cheap to ask, and it is the difference between one
+   training box and twenty labelling boxes.
+9. **Roboflow setup**, which is also the human-review step.
+10. **The detector trainer.** RF-DETR (Apache 2.0 — not Ultralytics, which is AGPL-3.0 and
+    needs a paid licence for closed source), 640px, normal batch size on 12 GB.
+
+**The ordering matters more than usual here**, because it is all one person. Items 1–6 come
+first: everything downstream is on synthetic fixtures until the detection pipeline runs, and
+Roboflow and the trainer have nothing to work on until there are labels to put in them.
+Items 7 and 8 are ten-minute tasks that can fill a gap.
+
 ### Justin
 
-1. Finish the Sheets export: create a Google Cloud service account, download its JSON key, share
-   the spreadsheet with the service account's email as **Editor**, and point
-   `GOOGLE_APPLICATION_CREDENTIALS` at the file. Keep that JSON outside the repo. Everything else
-   is done and the tabs are created automatically.
-2. Ask about the classroom machines.
-3. Keep running the ingest service and the web app.
+1. Keep running the ingest service and the web app.
+2. Component 3 is done; the next thing it needs is real analysis output to render.
 
-### Unassigned — decide who
+### A note on the split
 
-- **Human review of auto-labels.** Roboflow is chosen; nobody has set it up.
-- **Detector training.** RF-DETR (Apache 2.0, not Ultralytics which is AGPL-3.0), on Robert's
-  12 GB card, 640px, normal batch size.
+Robert now owns components 1 and 2, the labelling ensemble, review, training and the export
+credentials. That is nearly the whole project on one person, and it is a single point of
+failure worth naming out loud. See DECISIONS O2.
 
 ### Waiting on the world
 

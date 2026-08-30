@@ -205,6 +205,16 @@ Practical consequence: Robert is now on both sides of the Contract D boundary. T
 easy to "just make them match" instead of following the contract. Don't. Component 3 is written
 against doc 0, and CI checks the binary's output against it independently.
 
-**O2 — Human review and detector training are unassigned.** `open`
-Roboflow is decided (D8) and Robert's 12 GB card is the training box (H2), but nobody's name is
-on either task. "We decided Roboflow" and "someone set up Roboflow" are different states.
+**O2 — Robert also takes review, training, Sheets and the classroom ask.** `settled`
+Roboflow setup, the detector trainer, the Google service account, and asking about the
+classroom machines are all his.
+
+**This concentrates almost the whole project on one person.** Robert now owns components 1
+and 2, the labelling ensemble, review, training, and the export credentials; Justin owns
+component 3 and runs the ingest service. That is a real single point of failure — if Robert
+is unavailable for a week, everything except the web app stops.
+
+Recorded rather than argued with: it is the team's call, and the alternative was leaving two
+tasks unowned, which is worse. Worth revisiting if the critical path stalls. The cheapest
+hedge is ordering: the detection pipeline first, since everything downstream is on fixtures
+until it lands, and Roboflow and the trainer are useless without labels to put in them.
