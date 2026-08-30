@@ -327,23 +327,38 @@ function Invoke-Check {
                         $tempOut = Join-Path ([System.IO.Path]::GetTempPath()) 'frc-scouting-analysis-out'
                         $fixtureJob | ConvertTo-Json -Depth 10 | Set-Content -Path $tempJob -Encoding utf8
                         New-Item -ItemType Directory -Force -Path $tempOut | Out-Null
-                        $code = Invoke-Native {
-                            & $binary.FullName --job $tempJob --season (Join-Path $Repo 'contracts\seasons\2026.json') --out $tempOut
+                        # This must remain a stable plumbing test even when the developer has a
+                        # real detector configured in their shell.
+                        $hadDetectorConfig = Test-Path Env:FRC_DETECTOR_CONFIG
+                        $previousDetectorConfig = $env:FRC_DETECTOR_CONFIG
+                        Remove-Item Env:FRC_DETECTOR_CONFIG -ErrorAction SilentlyContinue
+                        try {
+                            $code = Invoke-Native {
+                                & $binary.FullName --job $tempJob --season (Join-Path $Repo 'contracts\seasons\2026.json') --out $tempOut
+                            }
+                        }
+                        finally {
+                            if ($hadDetectorConfig) { $env:FRC_DETECTOR_CONFIG = $previousDetectorConfig }
                         }
                         $expectedVersion = [int]((Get-Content (Join-Path $Repo 'contracts\SCHEMA_VERSION') -Raw).Trim())
                         $resultPath = Join-Path $tempOut 'result.json'
                         $tracksPath = Join-Path $tempOut 'tracks.jsonl'
-                        if ($code -ne 0 -or -not (Test-Path $resultPath) -or -not (Test-Path $tracksPath)) {
+                        $eventsPath = Join-Path $tempOut 'events.jsonl'
+                        if ($code -ne 0 -or -not (Test-Path $resultPath) -or -not (Test-Path $tracksPath) -or
+                            -not (Test-Path $eventsPath)) {
                             Bad 'analysis smoke test did not produce Contract D output'
                             $failed += 'analysis smoke test'
                         }
                         else {
                             $result = Get-Content $resultPath -Raw | ConvertFrom-Json
                             $tracks = @(Get-Content $tracksPath | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+                            $events = @(Get-Content $eventsPath | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
                             if ($result.schema_version -ne $expectedVersion -or $result.frames_total -le 1 -or
-                                $result.frames_analyzed -ne 1 -or $tracks.Count -ne 1 -or
-                                $tracks[0].boxes.Count -ne 1) {
-                                Bad 'analysis smoke output is not the expected real-video proof'
+                                $result.frames_analyzed -ne 0 -or $result.tracks_emitted -ne 0 -or
+                                $result.model_version -ne 'rfdetr-unconfigured' -or $tracks.Count -ne 0 -or
+                                $events.Count -ne 2 -or $events[0].event_type -ne 'match_start' -or
+                                $events[1].event_type -ne 'match_end') {
+                                Bad 'analysis smoke output is not the expected unconfigured-detector baseline'
                                 $failed += 'analysis smoke test'
                             }
                             else { Ok 'analysis real-video smoke test' }
@@ -407,8 +422,8 @@ function Invoke-Full {
     }
 
     Say 'Web app  -  http://localhost:5173' 'Green'
-    Write-Host '  Analysis currently proves the pipe with one diagnostic box, not real robot detection.'
-    Write-Host '  The download, player, and overlay work; do not use diagnostic output as scouting data.'
+    Write-Host '  Analysis emits real RF-DETR boxes only when FRC_DETECTOR_CONFIG names a trained local ONNX model.'
+    Write-Host '  Without that config, zero tracks is expected; it never invents a diagnostic robot box.'
     Push-Location $Web
     try { npm run dev } finally { Pop-Location }
 }

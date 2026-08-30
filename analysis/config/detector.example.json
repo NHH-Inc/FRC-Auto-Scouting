@@ -1,0 +1,14 @@
+{
+  "model_path": "../../data/models/robot-v1/onnx/inference_model.onnx",
+  "model_version": "rfdetr-robot-v1",
+  "input_name": "input",
+  "boxes_output_name": "dets",
+  "logits_output_name": "labels",
+  "input_width": 640,
+  "input_height": 640,
+  "robot_class_id": 0,
+  "background_class_id": -1,
+  "score_threshold": 0.5,
+  "sample_rate_hz": 2.0,
+  "shot_change_threshold": 0.55
+}

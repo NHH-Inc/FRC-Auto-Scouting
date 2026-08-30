@@ -57,14 +57,15 @@ Be clear on this before you go looking for a command that is not there.
 | 1. Pull video off YouTube | **works** | Part 3 |
 | 2. Extract frames from a segment | **works** | Part 4 |
 | 3. Label frames with the 3 local models | **works** | Part 4 |
-| 4. Human review of those labels | **not built** | Roboflow, decided but not set up |
-| 5. Train a detector | **not built** | no training code exists yet |
-| 6. Analyse a match (the C++ backend) | **pipeline proof only** | opens the real MP4, counts frames, and emits one diagnostic box; it does not detect robots yet |
+| 4. Human review of those labels | **external setup needed** | Roboflow project/review queue, which needs an account owner |
+| 5. Train a detector | **ready when labels exist** | Part 5 and `training\\run_rfdetr.ps1` on Robert's CUDA machine |
+| 6. Analyse a match (the C++ backend) | **baseline ready** | decodes real MP4s, and runs RF-DETR ONNX + IoU tracking when a local model is configured |
 | 7. Review results in the web app | **works** | Part 2 |
 
-So: **there is no "run the training" command**, because nobody has written a trainer. Steps 1–3
-produce reviewable proposals; steps 4 and 5 are the gap. Step 6 is the critical path — until the
-analysis backend looks at a video, the web app only has fixture data to show.
+Steps 1–3 produce reviewable proposals. Step 4 still needs the Roboflow account/project, but a
+temporary explicit auto-label baseline can now be materialized and trained in Part 5. Step 6
+emits no robot tracks until a trained local model is configured, rather than pretending a
+hand-placed box is a detection.
 
 ---
 
@@ -168,9 +169,11 @@ Now paste a YouTube link into the sidebar. The job walks
 `queued → downloading → downloaded → analyzing → complete`, and **the player opens as soon as the
 download finishes** — you do not wait for analysis.
 
-**Analysis now proves the full media path**: it opens the downloaded MP4 with OpenCV, counts real
-frames, and emits one clearly diagnostic hand-placed box. That confirms download → binary → API →
-overlay. It is **not robot detection** and must not be used as scouting data until the detector lands.
+**Analysis now proves the full media path**: it opens the downloaded MP4 with OpenCV and counts
+real frames. With no configured model it emits zero tracks; that is expected and honest. Once a
+trained RF-DETR ONNX model is configured, it samples frames, emits detected robot tracks, and
+marks broadcast-cut gaps. Bumper OCR, team identity, field coordinates, and action events remain
+future work, so do not use this baseline for scouting decisions yet.
 
 Videos that need a login:
 
@@ -241,21 +244,31 @@ copy this one's mistakes — that is why step 4 in the table above exists.
 
 ## Part 5 — training
 
-**There is no training code in this repo yet.** Nothing to run.
+Training is deliberately separate from ingest: it belongs on Robert's NVIDIA/CUDA machine, not
+Justin's AMD Windows machine. The script creates its own environment and trains only a one-class
+robot detector.
 
-What is decided and waiting for someone to build it:
+```powershell
+# Materialize one or more annotated collections into RF-DETR's required COCO layout.
+# --allow-unreviewed is a visible, temporary v1 quality compromise. Replace it with reviewed
+# Roboflow labels as soon as the team project exists.
+.\ingest\.venv\Scripts\python -m ingest.collection.cli export-coco `
+  --collection data\collections\<collection-id> `
+  --config configs\data_collection.example.yaml `
+  --output data\datasets\robot-v1 `
+  --allow-unreviewed
 
-- Robert's RTX 3060 **12 GB** does the training. That is enough to fine-tune a detector at 640px
-  with a normal batch size — no gradient accumulation tricks needed.
-- Detector is RF-DETR (Apache 2.0). Not Ultralytics YOLO, which is AGPL-3.0 and needs a paid
-  licence for closed source.
-- The dataset lives on Roboflow, which is also the review UI step 4 needs.
-- The team-ID model is a **classifier** over robot crops, trained separately from the detector.
-  The detector learns from (image, box); the classifier learns from (crop, team).
+# On Robert's RTX 3060 machine only.
+.\training\run_rfdetr.ps1 -Dataset data\datasets\robot-v1 -Output data\models\robot-v1
+```
 
-The correction UI in the web app is already producing human-verified `(track → team)` pairs, so
-the classifier has a real label source growing on its own. The detector does not — that is what
-steps 3 and 4 are for.
+It uses RF-DETR Small, `640px`, 100 epochs, and `batch-size auto`. The exported model is
+`data\models\robot-v1\onnx\inference_model.onnx`. Full directions are in `training\README.md`.
+
+The remaining human setup is still real work: create the Roboflow project/review queue, review
+the proposals, and export those reviewed labels. Detector labels are `(image, box)`; Nathaniel's
+separate team-ID model is a **classifier** over human-confirmed `(crop, team)` examples from web
+track corrections. It cannot be trained honestly until those corrections exist.
 
 ---
 
@@ -281,7 +294,7 @@ npm run validate:fixtures
 | `validate:fixtures` | Every fixture record against `contracts\*.schema.json`, cross-file invariants, and the five required awkward cases |
 | `smoke_test` | 71 checks driving every Contract E endpoint against the fixtures — no network, no yt-dlp, no analysis binary |
 | `pytest` | Downloader, collection and API unit tests |
-| `analysis` | Opens the fixture MP4 with OpenCV, counts its decodable frames, emits the diagnostic track, and checks Contract D output |
+| `analysis` | Opens the fixture MP4 with OpenCV, counts its decodable frames, and checks the contract-valid unconfigured-detector output (two match-boundary events and zero invented tracks) |
 
 **The C++ pipeline proof** is part of `run.ps1 check`. On Windows, install Visual Studio Build
 Tools with the **Desktop development with C++** workload, CMake, and OpenCV through vcpkg:
@@ -305,10 +318,10 @@ cmake -S analysis -B analysis\build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scri
 cmake --build analysis\build --config Release
 ```
 
-OpenCV is linked now for the video pipe proof. `analysis\vcpkg.json` also installs ONNX Runtime,
-ready for the next step, but it is intentionally not linked until the RF-DETR inference module
-exists; the plumbing proof should not depend on an unused runtime. Once `VCPKG_ROOT` is set,
-`run.ps1 check` automatically uses the same toolchain.
+OpenCV and ONNX Runtime are linked on a Windows inference machine. The detector stays disabled
+until `FRC_DETECTOR_CONFIG` points to a trained local RF-DETR ONNX file; the reproducible smoke
+test deliberately clears that variable so it always checks plumbing rather than local weights.
+Once `VCPKG_ROOT` is set, `run.ps1 check` automatically uses the same toolchain.
 
 **Regenerating fixtures.** Deterministic, so a clean regeneration changes nothing and CI fails
 if it does:

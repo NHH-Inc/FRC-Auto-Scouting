@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from .config import load_config
+from .coco_export import export_coco_dataset
 from .extractor import extract_collection
 from .ollama_annotator import annotate_collection, build_consensus
 from .validate import validate_collection
@@ -40,6 +41,12 @@ def parser() -> argparse.ArgumentParser:
     validate = commands.add_parser("validate-collection", help="validate collection integrity")
     validate.add_argument("--collection", required=True)
     validate.add_argument("--no-hashes", action="store_true")
+    coco = commands.add_parser("export-coco", help="materialise labels for RF-DETR training")
+    coco.add_argument("--collection", required=True, nargs="+", help="one or more match collections")
+    coco.add_argument("--config", required=True)
+    coco.add_argument("--output", required=True)
+    coco.add_argument("--labels-file", default="model-consensus.jsonl")
+    coco.add_argument("--allow-unreviewed", action="store_true")
     return root
 
 
@@ -67,6 +74,14 @@ def main() -> int:
         config = load_config(args.config)
         models = args.models or list(config.models)
         print(build_consensus(Path(args.collection), models, config.iou_threshold))
+        return 0
+    if args.command == "export-coco":
+        config = load_config(args.config)
+        report = export_coco_dataset(
+            collection=args.collection, config=config, output=args.output,
+            labels_file=args.labels_file, allow_unreviewed=args.allow_unreviewed,
+        )
+        print(json.dumps(report, indent=2))
         return 0
     report = validate_collection(args.collection, verify_hashes=not args.no_hashes)
     print(json.dumps(report, indent=2))

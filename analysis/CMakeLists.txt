@@ -4,10 +4,10 @@ project(FRCAnalysisBackend)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# The first real-pipeline milestone is deliberately small: OpenCV opens a real segment,
-# measures its actual metadata, and decodes it. ONNX Runtime is added when the detector lands;
-# linking it before there is a model to run only makes local setup harder.
-find_package(OpenCV REQUIRED COMPONENTS core videoio)
+# OpenCV decodes the video and prepares detector inputs. ONNX Runtime is optional for the Linux
+# contract-only CI build; when vcpkg supplies it, the Windows binary includes RF-DETR inference.
+find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio)
+find_package(onnxruntime CONFIG QUIET)
 
 # vcpkg supplies this on Robert's Windows machine. Keep the FetchContent fallback so the
 # Linux CI job remains self-contained and does not need a second package manager.
@@ -26,9 +26,17 @@ endif()
 add_executable(analysis
     src/main.cpp
     src/ContractModels.h
+    src/IoUTracker.cpp
+    src/IoUTracker.h
+    src/RFDetrDetector.cpp
+    src/RFDetrDetector.h
 )
 
 target_link_libraries(analysis PRIVATE nlohmann_json::nlohmann_json ${OpenCV_LIBS})
+if (TARGET onnxruntime::onnxruntime)
+    target_link_libraries(analysis PRIVATE onnxruntime::onnxruntime)
+    target_compile_definitions(analysis PRIVATE FRC_HAVE_ONNXRUNTIME=1)
+endif()
 
 # Installation/Output settings
 set_target_properties(analysis PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

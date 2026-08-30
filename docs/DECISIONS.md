@@ -176,18 +176,20 @@ have access to by a wide margin.
 
 ## Pipeline status
 
-**P1 — Steps 4 and 5 of the labelling pipeline do not exist.** `open`
-Download, frame extraction and VLM annotation all work. **Human review and training do not** —
-there is no trainer anywhere in the repo, and Roboflow is decided but not set up.
+**P1 — Human-reviewed labels are the next external dependency.** `open`
+Download, frame extraction, VLM annotation, COCO materialisation and the local RF-DETR
+train-and-export script now exist. Roboflow review still needs Robert to create the project,
+upload enough multi-match data, and have people correct the proposals. The repository cannot
+do that account-owned human step for him.
 
-Worth stating plainly because "how do I run the training" is a reasonable question with an
-unreasonable answer right now. What is settled: RF-DETR on Robert's 12 GB card, dataset and
-review on Roboflow, detector and team-ID classifier trained separately from different data.
+What is settled: RF-DETR on Robert's 12 GB card, dataset and review on Roboflow, detector and
+team-ID classifier trained separately from different data. `docs/ROBOFLOW.md` is the handoff.
 
-**P2 — Component 1 is the critical path.** `open`
-The OpenCV pipe proof now opens a real segment, counts decoded frames, and emits one diagnostic
-track through the overlay. Detection, tracking, OCR, and events are still not built, so this is a
-plumbing milestone rather than usable scouting output. The detector remains the critical path.
+**P2 — Component 1 needs real RF-DETR weights, then the analytics layers.** `open`
+The OpenCV pipe proof now opens a real segment, counts decoded frames, and runs an RF-DETR ONNX
+interface plus conservative IoU tracking when a local model config is present. Without one it
+emits zero tracks rather than a fake diagnostic robot. Scoreboard OCR, bumper/team ID,
+homography and action extraction are still not built, so training data remains the next blocker.
 
 ## Ownership
 

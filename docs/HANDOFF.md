@@ -4,7 +4,7 @@ Everything a person or an AI assistant needs to pick this project up cold. If yo
 dropped into this repo with no history, read this file top to bottom and you will know as much
 as anyone.
 
-Last updated 29 Aug 2026, at `SCHEMA_VERSION 3`.
+Last updated 30 Aug 2026, at `SCHEMA_VERSION 3`.
 
 ---
 
@@ -42,14 +42,16 @@ row that is wrong; they have been corrected, but if you find that row anywhere e
 | Ingest: yt-dlp, TBA, job queue, database, full Contract E API | **works** | Robert |
 | Ollama labelling ensemble (3 local vision models, IoU consensus) | **works** | Robert |
 | Google Sheets export | **works**, needs a service account JSON | Robert |
-| **Analysis backend: detection, tracking, OCR** | **real-video pipe proof; no detector yet** | **Robert** |
-| Human review of auto-labels | **not built** | Robert |
-| Detector training | **not built** | Robert |
+| **Analysis backend: detection, tracking, OCR** | **RF-DETR ONNX interface + conservative IoU tracking; needs trained weights** | **Robert** |
+| Human review of auto-labels | **Roboflow handoff documented; needs a project/account and people reviewing** | Robert |
+| Detector training | **local RF-DETR trainer/export script ready; needs reviewed multi-match labels** | Robert |
 
-**The critical path is the analysis backend.** The binary now opens a real segment with OpenCV,
-counts decoded frames, and emits one explicit diagnostic hand-placed track. That validates ingest
-→ binary → database → API → overlay. There is still no detection pipeline; the diagnostic box is
-not scouting output and must be replaced by the detector/tracker path.
+**The critical path is still the analysis backend, but the pipe is proven.** The binary opens a
+real segment with OpenCV, reads its true dimensions and frame count, and emits contract-valid
+match-boundary events. If `FRC_DETECTOR_CONFIG` names a trained RF-DETR ONNX file, it runs real
+robot detection and conservative IoU tracking, including explicit cut/lost-detection gaps. With
+no local model configured it intentionally emits **zero tracks** — it never invents a diagnostic
+robot box. Bumper OCR, team identification, field homography and action events remain to build.
 
 Nathaniel originally owned component 1; he is busy, so **Robert now owns components 1 and 2.**
 
@@ -177,41 +179,47 @@ is not ours to decide. Download at home, carry segments in.
 
 ### Robert — component 1 is the whole project right now
 
-1. **Build the detection pipeline.** Everything else runs on synthetic fixtures until this looks
-   at a real video. The contract surface is already written and green in CI:
-   `analysis/src/ContractModels.h` is at v3 with a `std::optional` serializer, and `main.cpp`
-   parses `--job/--season/--out` and reports progress and error codes correctly. What is missing
-   is detection, tracking, homography, OCR and event extraction.
-2. Build from **Contract B in doc 0**, not doc 1's old field list. Emit `gaps` on every track.
+1. **Create reviewed multi-match robot labels.** Run collection extraction and local consensus,
+   then follow `docs/ROBOFLOW.md`. Keep match-level splits: do not put frames from one match in
+   both train and validation. The `export-coco` command accepts several collections for exactly
+   this reason.
+2. **Train and connect RF-DETR.** On Robert's CUDA machine run
+   `training\run_rfdetr.ps1`, copy `analysis\config\detector.example.json` to the ignored
+   `detector.local.json`, point it at the exported ONNX model, and set
+   `FRC_DETECTOR_CONFIG` before running a real ingest job. Check raw tracks and gaps in the UI.
+3. **Add scoreboard OCR next.** It is independent of bumper OCR and supplies a trustworthy
+   match start. Its crop must be per-video-source config, never hardcoded.
+4. Build from **Contract B in doc 0**, not doc 1's old field list. Emit `gaps` on every track.
    Read phase boundaries from the season config passed via `--season`.
-3. **You are now on both sides of the Contract D boundary.** Resist making the two sides match
+5. **You are now on both sides of the Contract D boundary.** Resist making the two sides match
    each other instead of matching doc 0 — component 3 is written against the contract, and CI
    checks the binary's output against it independently.
-4. Measure whether `gemma3:4b` is contributing a real vote to the ensemble. It takes image input
+6. Measure whether `gemma3:4b` is contributing a real vote to the ensemble. It takes image input
    but is not trained for bounding-box grounding the way the two Qwen-VL models are, and since
    those two share a family, gemma3 carries all the actual diversity. You already keep per-model
    raw output, so this is ~20 minutes on 50 frames.
-5. Try `iou_threshold: 0.40` rather than 0.50. A robot in a wide field shot is often under 5% of
+7. Try `iou_threshold: 0.40` rather than 0.50. A robot in a wide field shot is often under 5% of
    frame width, where a few pixels of honest disagreement drops a real match below 0.5.
-6. `jpeg_quality: 85` instead of 95 roughly halves your frame storage with no meaningful loss for
+8. `jpeg_quality: 85` instead of 95 roughly halves your frame storage with no meaningful loss for
    detection training. You have 40 GB.
 
 ### Robert — also owns everything below, in this order
 
-7. **Google Sheets export.** Create a Google Cloud service account, download its JSON key,
+9. **Google Sheets export.** Create a Google Cloud service account, download its JSON key,
    share the spreadsheet with the service account's email as **Editor**, and point
    `GOOGLE_APPLICATION_CREDENTIALS` at the file. Keep that JSON outside the repo. Everything
    else is done; the tabs are created automatically. Sheet id is already in `ingest/.env`.
-8. **Ask about the classroom machines.** Cheap to ask, and it is the difference between one
+10. **Ask about the classroom machines.** Cheap to ask, and it is the difference between one
    training box and twenty labelling boxes.
-9. **Roboflow setup**, which is also the human-review step.
-10. **The detector trainer.** RF-DETR (Apache 2.0 — not Ultralytics, which is AGPL-3.0 and
+11. **Roboflow setup**, which is also the human-review step. The exact account/project/upload
+    procedure is in `docs/ROBOFLOW.md`.
+12. **The detector trainer.** RF-DETR (Apache 2.0 — not Ultralytics, which is AGPL-3.0 and
     needs a paid licence for closed source), 640px, normal batch size on 12 GB.
 
-**The ordering matters more than usual here**, because it is all one person. Items 1–6 come
-first: everything downstream is on synthetic fixtures until the detection pipeline runs, and
-Roboflow and the trainer have nothing to work on until there are labels to put in them.
-Items 7 and 8 are ten-minute tasks that can fill a gap.
+**The ordering matters more than usual here**, because it is all one person. Items 1–8 come
+first: the code path is ready, but it cannot produce real tracks until it has model weights.
+Roboflow and the trainer turn existing collections into those weights. Items 9 and 10 are
+ten-minute tasks that can fill a gap.
 
 ### Justin
 

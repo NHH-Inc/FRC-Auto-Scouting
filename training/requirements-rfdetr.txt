@@ -1,0 +1,2 @@
+# Install this only in Robert's CUDA training environment, not ingest\.venv.
+rfdetr[train,onnx]

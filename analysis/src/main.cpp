@@ -22,9 +22,12 @@
 #include <vector>
 
 #include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 
 #include "ContractModels.h"
+#include "IoUTracker.h"
+#include "RFDetrDetector.h"
 
 namespace fs = std::filesystem;
 
@@ -72,6 +75,42 @@ std::string iso_now() {
     std::ostringstream out;
     out << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
     return out.str();
+}
+
+bool is_camera_cut(const cv::Mat& bgr, cv::Mat& previous_histogram, double threshold) {
+    cv::Mat thumbnail;
+    cv::resize(bgr, thumbnail, cv::Size(96, 54), 0.0, 0.0, cv::INTER_AREA);
+    cv::Mat hsv;
+    cv::cvtColor(thumbnail, hsv, cv::COLOR_BGR2HSV);
+    const int channels[] = {0, 1};
+    const int histogram_size[] = {12, 8};
+    const float hue_range[] = {0.0F, 180.0F};
+    const float saturation_range[] = {0.0F, 256.0F};
+    const float* ranges[] = {hue_range, saturation_range};
+    cv::Mat histogram;
+    cv::calcHist(&hsv, 1, channels, cv::Mat(), histogram, 2, histogram_size, ranges, true, false);
+    cv::normalize(histogram, histogram, 1.0, 0.0, cv::NORM_L1);
+    if (previous_histogram.empty()) {
+        previous_histogram = histogram;
+        return false;
+    }
+    const double distance = cv::compareHist(previous_histogram, histogram, cv::HISTCMP_BHATTACHARYYA);
+    previous_histogram = histogram;
+    return distance >= threshold;
+}
+
+frc::Event match_event(const frc::Job& job, const frc::SeasonConfig& season, double t_seconds,
+                       const char* type) {
+    frc::Event event;
+    event.job_id = job.job_id;
+    event.match_id = *job.match_id;
+    event.event_id = uuid4();
+    event.t_seconds = t_seconds;
+    event.phase = frc::phase_at(t_seconds, season);
+    event.event_type = type;
+    event.confidence = 1.0;
+    event.source = "model";
+    return event;
 }
 
 }  // namespace
@@ -144,38 +183,55 @@ int main(int argc, char* argv[]) {
 
         fs::create_directories(out_dir);
 
-        // Stages come from the closed `stage` enum so component 1's stdout and component 3's
-        // labels cannot drift apart.
-        print_progress(0.05, frc::stage::kDecoding);
-        print_progress(0.25, frc::stage::kDetecting);
-        print_progress(0.55, frc::stage::kTracking);
-        print_progress(0.80, frc::stage::kOcr);
-        print_progress(0.95, frc::stage::kEvents);
-
-        // ---- Pipeline proof.
-        //
-        // Detection (RF-DETR) -> ByteTrack -> homography -> bumper OCR -> event extraction.
-        // Everything below is contract-shaped scaffolding so components 2 and 3 can integrate
-        // against a real binary. This first slice opens a real segment and decodes it;
-        // detection, tracking and OCR follow after this route is proven end-to-end.
-        //
-        // When it does: emit every skipped shot-change interval into the owning track's
-        // `gaps`, and do NOT split the track at one -- re-identification exists to stitch
-        // fragments into a single logical track.
-
         cv::VideoCapture video(*job.local_path);
         if (!video.isOpened()) {
             return fail("Failed to open video: " + *job.local_path,
                         frc::error_code::kVideoUnavailable);
         }
+
+        // Model configuration is deliberately local: Contract A jobs stay portable and never
+        // name a machine-specific model file. With no config, this remains an honest decode-only
+        // run with zero tracks -- the old diagnostic box is intentionally gone.
+        const frc::vision::DetectorConfig detector_config = frc::vision::load_detector_config();
+        const frc::vision::RFDetrDetector detector(detector_config);
+        const bool detector_enabled = detector.enabled();
+
+        print_progress(0.05, frc::stage::kDecoding);
         cv::Mat frame;
         int decoded_frames = 0;
         int decoded_width = 0;
         int decoded_height = 0;
+        int frames_analyzed = 0;
+        int frames_skipped_shot_change = 0;
+        const double reported_fps = video.get(cv::CAP_PROP_FPS);
+        const double decode_fps = reported_fps > 0.0 ? reported_fps : *job.fps;
+        if (decode_fps <= 0.0) {
+            return fail("Video reports an invalid frame rate", frc::error_code::kAnalysisFailed);
+        }
+        const int sample_interval_frames = std::max(
+            1, static_cast<int>(std::llround(decode_fps / detector_config.sample_rate_hz)));
+        const double box_sample_rate = decode_fps / sample_interval_frames;
+        frc::vision::IoUTracker tracker;
+        cv::Mat previous_histogram;
         while (video.read(frame) && !frame.empty()) {
             if (decoded_frames == 0) {
                 decoded_width = frame.cols;
                 decoded_height = frame.rows;
+            }
+            if (detector_enabled && decoded_frames % sample_interval_frames == 0) {
+                const double t_seconds = decoded_frames / decode_fps;
+                const bool camera_cut = is_camera_cut(
+                    frame, previous_histogram, detector_config.shot_change_threshold);
+                if (camera_cut) {
+                    ++frames_skipped_shot_change;
+                    tracker.update(t_seconds, {}, true);
+                } else {
+                    print_progress(0.25, frc::stage::kDetecting);
+                    const auto detections = detector.infer(frame);
+                    ++frames_analyzed;
+                    print_progress(0.55, frc::stage::kTracking);
+                    tracker.update(t_seconds, detections, false);
+                }
             }
             ++decoded_frames;
         }
@@ -184,44 +240,16 @@ int main(int argc, char* argv[]) {
                         frc::error_code::kAnalysisFailed);
         }
 
+        const double match_end_t = std::max(0.0, (decoded_frames - 1) / decode_fps);
+        tracker.finish(match_end_t);
+        const std::vector<frc::Track>& tracks = tracker.tracks();
+        // Action/OCR inference needs reviewed data. Until it exists, emit only safe match-level
+        // events; their required nullable fields are supplied by ContractModels.h.
         std::vector<frc::Event> events;
-        std::vector<frc::Track> tracks;
-
-        constexpr double kBoxSampleRate = 1.0;
-        const double match_start_t = 0.0;
-
-        // One match-level event, to keep the output contract-valid rather than empty.
-        // team, track_id and both field coordinates are null on these by definition.
-        frc::Event start_event;
-        start_event.job_id = job.job_id;
-        start_event.match_id = *job.match_id;
-        start_event.event_id = uuid4();
-        start_event.t_seconds = match_start_t;
-        start_event.phase = frc::phase_at(0.0, season);
-        start_event.event_type = frc::event_type::kMatchStart;
-        start_event.confidence = 1.0;
-        start_event.source = "model";
-        events.push_back(start_event);
-
-        // Diagnostic-only hand-placed box. It proves the complete path from a decoded video
-        // through tracks.jsonl, the database and the web overlay without pretending a detector
-        // exists. It is normalized from decoded pixel dimensions so this catches bad metadata
-        // and coordinate conversions before RF-DETR and ByteTrack are introduced.
-        constexpr double kDiagnosticBoxPixels = 64.0;
-        const double diagnostic_width_px = std::min(kDiagnosticBoxPixels, decoded_width / 4.0);
-        const double diagnostic_height_px = std::min(kDiagnosticBoxPixels, decoded_height / 4.0);
-        const double left_px = (decoded_width - diagnostic_width_px) / 2.0;
-        const double top_px = (decoded_height - diagnostic_height_px) / 2.0;
-        frc::Track diagnostic_track;
-        diagnostic_track.track_id = 0;
-        diagnostic_track.boxes.push_back({
-            match_start_t,
-            left_px / decoded_width,
-            top_px / decoded_height,
-            diagnostic_width_px / decoded_width,
-            diagnostic_height_px / decoded_height,
-        });
-        tracks.push_back(diagnostic_track);
+        events.push_back(match_event(job, season, 0.0, frc::event_type::kMatchStart));
+        events.push_back(match_event(job, season, match_end_t, frc::event_type::kMatchEnd));
+        print_progress(0.80, frc::stage::kOcr);
+        print_progress(0.95, frc::stage::kEvents);
 
         std::ofstream events_file(fs::path(out_dir) / "events.jsonl");
         for (const auto& e : events) {
@@ -235,12 +263,12 @@ int main(int argc, char* argv[]) {
 
         frc::RunResult result;
         result.job_id = job.job_id;
-        result.model_version = "pipe-proof-0.1.0";
-        result.box_sample_rate = kBoxSampleRate;
+        result.model_version = detector_enabled ? detector_config.model_version : "rfdetr-unconfigured";
+        result.box_sample_rate = box_sample_rate;
         result.homography_ok = false;
         result.frames_total = decoded_frames;
-        result.frames_analyzed = 1;
-        result.frames_skipped_shot_change = 0;
+        result.frames_analyzed = frames_analyzed;
+        result.frames_skipped_shot_change = frames_skipped_shot_change;
         result.tracks_emitted = static_cast<int>(tracks.size());
         result.events_emitted = static_cast<int>(events.size());
         // Null while the season's point values are zero placeholders. Doc 0: "Do not invent
