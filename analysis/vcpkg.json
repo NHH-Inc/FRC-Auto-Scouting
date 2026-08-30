@@ -1,0 +1,12 @@
+{
+  "name": "frc-analysis-backend",
+  "version-string": "0.1.0",
+  "description": "Native dependencies for the FRC video-analysis backend.",
+  "dependencies": [
+    {
+      "name": "opencv4",
+      "features": ["ffmpeg"]
+    },
+    "onnxruntime"
+  ]
+}

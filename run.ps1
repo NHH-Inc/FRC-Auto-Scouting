@@ -193,7 +193,17 @@ function Invoke-Check {
         else {
             $analysisDir = Join-Path $Repo 'analysis'
             $analysisBuild = Join-Path $analysisDir 'build'
-            $code = Invoke-Native { cmake -S $analysisDir -B $analysisBuild }
+            $configureArgs = @('-S', $analysisDir, '-B', $analysisBuild)
+            if ($env:VCPKG_ROOT) {
+                $vcpkgToolchain = Join-Path $env:VCPKG_ROOT 'scripts\buildsystems\vcpkg.cmake'
+                if (Test-Path $vcpkgToolchain) {
+                    $configureArgs += "-DCMAKE_TOOLCHAIN_FILE=$vcpkgToolchain"
+                    Ok 'using vcpkg from VCPKG_ROOT'
+                }
+                else { Warn 'VCPKG_ROOT is set but its CMake toolchain was not found' }
+            }
+            else { Warn 'VCPKG_ROOT is not set; CMake must find OpenCV another way' }
+            $code = Invoke-Native { & cmake @configureArgs }
             if ($code -ne 0) {
                 $failed += 'analysis configure'
             }

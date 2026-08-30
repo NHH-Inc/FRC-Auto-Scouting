@@ -280,17 +280,18 @@ Tools with the **Desktop development with C++** workload, CMake, and OpenCV thro
 
 ```bash
 # in: REPO
-# once, from a Developer PowerShell with vcpkg installed
-vcpkg install opencv4[ffmpeg] onnxruntime:x64-windows
+# once, from a Developer PowerShell after cloning/bootstrapping vcpkg
+$env:VCPKG_ROOT = 'C:\vcpkg'       # replace with your actual vcpkg folder
 
-# in: REPO; replace C:\vcpkg with your vcpkg folder
-cmake -S analysis -B analysis\build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+# in: REPO. CMake reads analysis\vcpkg.json and installs OpenCV+FFmpeg and ONNX Runtime.
+cmake -S analysis -B analysis\build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
 cmake --build analysis\build --config Release
 ```
 
-OpenCV is linked now for the video pipe proof. ONNX Runtime is installed and ready for the next
-step, but intentionally is not linked until the RF-DETR inference module exists; the plumbing proof
-should not depend on an unused runtime.
+OpenCV is linked now for the video pipe proof. `analysis\vcpkg.json` also installs ONNX Runtime,
+ready for the next step, but it is intentionally not linked until the RF-DETR inference module
+exists; the plumbing proof should not depend on an unused runtime. Once `VCPKG_ROOT` is set,
+`run.ps1 check` automatically uses the same toolchain.
 
 **Regenerating fixtures.** Deterministic, so a clean regeneration changes nothing and CI fails
 if it does:
