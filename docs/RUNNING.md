@@ -279,8 +279,12 @@ npm run validate:fixtures
 Tools with the **Desktop development with C++** workload, CMake, and OpenCV through vcpkg:
 
 ```bash
-# in: REPO
-# once, from a Developer PowerShell after cloning/bootstrapping vcpkg
+# once: install Visual Studio Build Tools with "Desktop development with C++" and CMake tools.
+# Then clone and bootstrap vcpkg (skip the clone if C:\vcpkg already exists).
+git clone https://github.com/microsoft/vcpkg C:\vcpkg
+C:\vcpkg\bootstrap-vcpkg.bat
+
+# in a new Developer PowerShell
 $env:VCPKG_ROOT = 'C:\vcpkg'       # replace with your actual vcpkg folder
 
 # in: REPO. CMake reads analysis\vcpkg.json and installs OpenCV+FFmpeg and ONNX Runtime.
