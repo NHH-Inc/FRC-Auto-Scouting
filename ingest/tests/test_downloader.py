@@ -136,6 +136,18 @@ class DownloaderTests(unittest.TestCase):
         self.assertEqual(actual, str(expected))
         youtube_dl.assert_not_called()
 
+    @patch("ingest.downloader.shutil.which", return_value="/usr/bin/ffmpeg")
+    @patch("ingest.downloader.yt_dlp.YoutubeDL", FakeYoutubeDL)
+    def test_live_capture_records_to_its_own_file_from_start(self, _which):
+        path = self.downloader.capture_live("abcdefghijk", "live-job")
+
+        options = FakeYoutubeDL.instances[0].options
+        self.assertEqual(Path(path).read_bytes(), b"local mp4")
+        self.assertIn("live_live-job", path)
+        self.assertTrue(options["live_from_start"])
+        self.assertNotIn("download_ranges", options)
+        self.assertEqual(options["merge_output_format"], "mp4")
+
     @patch("ingest.downloader.yt_dlp.YoutubeDL", FakeYoutubeDL)
     def test_stream_resolver_selects_one_video_audio_file_and_caches_it(self):
         first = self.downloader.resolve_stream("abcdefghijk")

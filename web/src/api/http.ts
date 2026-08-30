@@ -107,6 +107,7 @@ export class HttpApi implements ScoutingApi {
     // "resolve it for me" from "it is definitively unknown".
     if (input.matchId) body.match_id = input.matchId;
     if (input.season) body.season = input.season;
+    if (input.liveCapture) body.live_capture = true;
     const raw = await this.request<WireJob>('/jobs', { method: 'POST', body: JSON.stringify(body) });
     const job = parseJob(raw, log);
     if (!job) throw new ApiError('Ingest returned a job that failed contract validation', 200, '/jobs');

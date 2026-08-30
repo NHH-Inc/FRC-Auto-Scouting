@@ -1,6 +1,6 @@
 import os
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 # Make direct imports (for example ``python -m ingest.db_check``) honour the same host-only
@@ -29,6 +29,14 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    # create_all does not alter pre-existing tables. Upgrade the team's existing jobs table
+    # in place; this optional field is backward compatible with Contract A.
+    columns = {column["name"] for column in inspect(engine).get_columns("jobs")}
+    if "capture_mode" not in columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE jobs ADD COLUMN capture_mode VARCHAR DEFAULT 'recorded'")
+            )
 
 
 def verify_connection() -> str:

@@ -153,7 +153,15 @@ async def create_job(
     try:
         info = video_downloader.get_video_info(url)
         video_id = info.get("id")
-        start_offset, duration, _full_video = _media_window(url, info)
+        is_live = bool(info.get("is_live"))
+        if payload.get("live_capture") and not is_live:
+            raise ValueError("That YouTube link is not currently live; queue it as a normal video instead")
+        if is_live:
+            # Live sources have no stable end time. The completed MP4 is probed before this
+            # job reaches downloaded, where Contract A requires all media metadata.
+            start_offset, duration = 0.0, None
+        else:
+            start_offset, duration, _full_video = _media_window(url, info)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to get video info: {exc}")
 
@@ -169,6 +177,7 @@ async def create_job(
         # unresolved job's events.
         match_id=match_id,
         season=int(season),
+        capture_mode="live" if is_live else "recorded",
         status="queued",
         attempt=1,
         start_offset=start_offset,
@@ -189,7 +198,7 @@ async def create_job(
     db.commit()
     db.refresh(db_job)
 
-    background_tasks.add_task(process_job, job_id, url)
+    background_tasks.add_task(process_job, job_id, url, is_live)
 
     return job_to_dict(db_job)
 
@@ -254,11 +263,11 @@ async def retry_job(
     retry_url = f"https://www.youtube.com/watch?v={job.video_id}"
     if job.start_offset:
         retry_url += f"&t={job.start_offset}s"
-    background_tasks.add_task(process_job, job_id, retry_url)
+    background_tasks.add_task(process_job, job_id, retry_url, job.capture_mode == "live")
     return job_to_dict(job)
 
 
-def process_job(job_id: str, url: str):
+def process_job(job_id: str, url: str, live_capture: bool = False):
     db = next(database.get_db())
     job = db.query(models.Job).filter(models.Job.job_id == job_id).first()
     if job is None:
@@ -272,9 +281,6 @@ def process_job(job_id: str, url: str):
 
     try:
         set_status("downloading", stage="downloading", progress=0.0)
-
-        info = video_downloader.get_video_info(url)
-        start_offset, duration, full_video = _media_window(url, info)
 
         last_download_progress = -1.0
 
@@ -291,19 +297,34 @@ def process_job(job_id: str, url: str):
             if not should_commit:
                 return
             job.progress = progress
-            job.stage = stage
+            # Contract A intentionally has a closed stage enum. The additive capture_mode field
+            # tells the UI this is live capture while the valid lifecycle stage remains download.
+            job.stage = "downloading"
             if progress is not None:
                 last_download_progress = progress
             db.commit()
 
-        local_path = video_downloader.download_segment(
-            video_id=job.video_id,
-            start_time=start_offset,
-            duration=duration,
-            job_id=job_id,
-            full_video=full_video,
-            on_progress=on_download_progress,
-        )
+        if live_capture:
+            local_path = video_downloader.capture_live(
+                video_id=job.video_id, job_id=job_id, on_progress=on_download_progress,
+            )
+            media = video_downloader.probe_media(local_path)
+            start_offset = 0.0
+            duration, fps = media["duration"], media["fps"]
+            width, height = media["width"], media["height"]
+        else:
+            info = video_downloader.get_video_info(url)
+            start_offset, duration, full_video = _media_window(url, info)
+            local_path = video_downloader.download_segment(
+                video_id=job.video_id,
+                start_time=start_offset,
+                duration=duration,
+                job_id=job_id,
+                full_video=full_video,
+                on_progress=on_download_progress,
+            )
+            fps = info.get("fps") or 30.0
+            width, height = info.get("width") or 1920, info.get("height") or 1080
 
         # Write the media metadata back to the JOB, not just into the dict handed to the
         # binary. Component 3 sizes the player from these and cannot open one without them.
@@ -312,9 +333,9 @@ def process_job(job_id: str, url: str):
             local_path=local_path,
             start_offset=start_offset,
             duration=duration,
-            fps=info.get("fps") or 30.0,
-            width=info.get("width") or 1920,
-            height=info.get("height") or 1080,
+            fps=fps,
+            width=width,
+            height=height,
             stage=None,
         )
 

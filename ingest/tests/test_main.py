@@ -77,6 +77,31 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(body["duration"], 180)
         self.assertEqual(body["status"], "queued")
 
+    def test_currently_live_link_becomes_a_capture_job(self):
+        info = {"id": "abcdefghijk", "is_live": True, "width": 1280, "height": 720}
+        with (
+            patch.object(main.video_downloader, "get_video_info", return_value=info),
+            patch.object(main, "process_job"),
+        ):
+            response = self.client.post(
+                "/api/jobs", json={"url": "https://youtube.com/watch?v=abcdefghijk", "live_capture": True}
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["capture_mode"], "live")
+        self.assertIsNone(body["duration"])
+        self.assertEqual(body["status"], "queued")
+
+    def test_live_capture_rejects_a_finished_video(self):
+        info = {"id": "abcdefghijk", "duration": 300, "fps": 30, "width": 1280, "height": 720}
+        with patch.object(main.video_downloader, "get_video_info", return_value=info):
+            response = self.client.post(
+                "/api/jobs", json={"url": "https://youtube.com/watch?v=abcdefghijk", "live_capture": True}
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("not currently live", response.json()["error"])
+
     def test_errors_use_contract_shape(self):
         with patch.object(
             main.video_downloader, "get_video_info", side_effect=RuntimeError("unavailable")

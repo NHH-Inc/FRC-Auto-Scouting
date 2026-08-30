@@ -14,7 +14,7 @@ export interface SidebarProps {
   selectedJobId: string | null;
   apiMode: 'http' | 'fixture';
   onSelectJob: (jobId: string) => void;
-  onCreate: (input: { url: string; matchId?: string | null }) => Promise<unknown>;
+  onCreate: (input: { url: string; matchId?: string | null; liveCapture?: boolean }) => Promise<unknown>;
   onDelete: (jobId: string) => Promise<void>;
   onRetry: (job: Job) => Promise<unknown>;
 }
@@ -70,10 +70,11 @@ export function Sidebar(props: SidebarProps) {
 function NewJobForm({
   onCreate,
 }: {
-  onCreate: (input: { url: string; matchId?: string | null }) => Promise<unknown>;
+  onCreate: (input: { url: string; matchId?: string | null; liveCapture?: boolean }) => Promise<unknown>;
 }) {
   const [url, setUrl] = useState('');
   const [matchId, setMatchId] = useState('');
+  const [liveCapture, setLiveCapture] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -94,9 +95,10 @@ function NewJobForm({
     setBusy(true);
     try {
       // match_id is optional; component 2 resolves it from video metadata when omitted.
-      await onCreate({ url: url.trim(), matchId: matchId.trim() || null });
+      await onCreate({ url: url.trim(), matchId: matchId.trim() || null, liveCapture });
       setUrl('');
       setMatchId('');
+      setLiveCapture(false);
     } catch (err) {
       setProblem((err as Error).message);
     } finally {
@@ -129,9 +131,23 @@ function NewJobForm({
           onChange={(e) => setMatchId(e.target.value)}
         />
       </label>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={liveCapture}
+          onChange={(e) => setLiveCapture(e.target.checked)}
+        />
+        Capture this live stream
+      </label>
+      {liveCapture && (
+        <p className="hint">
+          The link must be live now. This computer records until YouTube ends the stream, then
+          analyzes the finished video. It does not create scouting data during the match.
+        </p>
+      )}
       {!matchOk && <p className="hint bad">lowercase TBA key, e.g. 2026casf_qm42</p>}
       <button type="submit" disabled={busy}>
-        {busy ? 'Queueing…' : 'Queue video'}
+        {busy ? 'Queueing…' : liveCapture ? 'Start live capture' : 'Queue video'}
       </button>
       {problem && <p className="error">{problem}</p>}
     </form>
@@ -178,7 +194,9 @@ function JobCard({
         )}
         {busy && job.stage && (
           <div className="job-stage muted">
-            {job.stage}
+            {job.captureMode === 'live' && job.status === 'downloading'
+              ? 'capturing live stream'
+              : job.stage}
             {job.progress != null ? ` · ${Math.round(job.progress * 100)}%` : ''}
           </div>
         )}

@@ -200,6 +200,7 @@ export class FixtureApi implements ScoutingApi {
       matchId: input.matchId ?? null,
       season: input.season ?? template.season,
       videoId: extractId(input.url) ?? template.videoId,
+      captureMode: input.liveCapture ? 'live' : 'recorded',
       startOffset: parseVideoStartTime(input.url),
       status: 'queued',
       stage: null,

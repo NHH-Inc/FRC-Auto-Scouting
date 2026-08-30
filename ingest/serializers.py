@@ -30,6 +30,8 @@ def job_to_dict(job) -> dict:
         "match_id": job.match_id,
         "season": job.season,
         "video_id": job.video_id,
+        # Older web clients ignore this additive field; the current one labels live capture.
+        "capture_mode": job.capture_mode or "recorded",
         "local_path": job.local_path,
         "start_offset": job.start_offset,
         "duration": job.duration,

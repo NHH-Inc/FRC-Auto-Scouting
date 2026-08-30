@@ -25,6 +25,8 @@ export interface CreateJobInput {
   matchId?: string | null;
   /** Optional. Component 2 defaults it when omitted. */
   season?: number | null;
+  /** Record an active stream until it ends, then analyze the finished MP4. */
+  liveCapture?: boolean;
 }
 
 export interface ExportInput {

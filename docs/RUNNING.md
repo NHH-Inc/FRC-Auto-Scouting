@@ -185,6 +185,19 @@ $env:YTDLP_COOKIES_FROM_BROWSER = 'chrome'
 
 Downloaded segments land in `data\segments\`. Note the filename — Part 4 needs it.
 
+### Capture an active livestream
+
+This is useful when you start the ingest service before an FRC broadcast. In the sidebar, paste
+the active YouTube link, check **Capture this live stream**, and press **Start live capture**.
+The ingest machine records the source locally until YouTube ends the stream. Only then does it
+probe the completed MP4 and run normal analysis.
+
+This is **not live scouting**: it will not show robot boxes, teams, or events during a match.
+It is simply an automatic way to obtain a usable recording without waiting for YouTube to finish
+processing the VOD. Start it only when you have enough free disk for the broadcast, and run it on
+your home ingest machine rather than school hardware. If the source is not currently live, the
+queue tells you to use ordinary video mode instead.
+
 ---
 
 ## Part 4 — labelling frames with the local models

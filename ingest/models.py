@@ -27,6 +27,8 @@ class Job(Base):
     # Selects /contracts/seasons/<year>.json, so old footage stays analyzable.
     season = Column(Integer, nullable=False, default=2026)
     video_id = Column(String(11), nullable=False)
+    # Additive annotation: live jobs use the normal lifecycle once recording ends.
+    capture_mode = Column(String, nullable=False, default="recorded", server_default="recorded")
     local_path = Column(String, nullable=True)
     start_offset = Column(Float, default=0.0, nullable=False)
     # Unknowable until the download reports them; required from status 'downloaded' onward.

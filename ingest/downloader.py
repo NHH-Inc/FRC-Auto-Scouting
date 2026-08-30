@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -282,6 +284,109 @@ class VideoDownloader:
         if on_progress:
             on_progress(1.0, "downloaded")
         return str(output_path)
+
+    def capture_live(
+        self,
+        video_id: str,
+        job_id: str,
+        *,
+        on_progress: ProgressCallback | None = None,
+    ) -> str:
+        """Record a live source until it finishes, then return one immutable MP4.
+
+        This is capture-then-analyse, not real-time inference. The resulting file deliberately
+        enters the same safe, repeatable pipeline as an ordinary downloaded segment.
+        """
+        if not self.has_ffmpeg:
+            raise RuntimeError(
+                "ffmpeg is required to record and merge a live YouTube stream. "
+                "Install ffmpeg and retry this job."
+            )
+
+        # Do not cache: two captures of the same stream may start at different times.
+        output_path = self.download_dir / f"{video_id}_live_{job_id}.mp4"
+
+        def progress_hook(data: dict):
+            if not on_progress:
+                return
+            status = data.get("status")
+            if status == "finished":
+                on_progress(1.0, "finalizing")
+            elif status == "downloading":
+                # A live feed has no reliable final byte count.
+                on_progress(None, "capturing_live")
+
+        ydl_opts: dict = {
+            "format": self.format_selector,
+            "outtmpl": str(output_path),
+            "noplaylist": True,
+            "quiet": True,
+            "noprogress": True,
+            "no_warnings": True,
+            "retries": 3,
+            "fragment_retries": 3,
+            "concurrent_fragment_downloads": 1,
+            "progress_hooks": [progress_hook],
+            # Fail clearly if YouTube cannot provide the stream from its beginning rather
+            # than silently producing a partial recording that looks like a full match.
+            "live_from_start": True,
+            "merge_output_format": "mp4",
+        }
+        cookies = os.environ.get("YTDLP_COOKIES_FROM_BROWSER")
+        if cookies:
+            ydl_opts["cookiesfrombrowser"] = (cookies,)
+
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        try:
+            with self._download_lock:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+        except DownloadError as exc:
+            raise RuntimeError(f"yt-dlp live capture failed: {exc}") from exc
+
+        if not output_path.exists() or output_path.stat().st_size == 0:
+            raise RuntimeError(f"yt-dlp reported success but {output_path.name} is missing")
+        if on_progress:
+            on_progress(1.0, "captured")
+        return str(output_path)
+
+    def probe_media(self, media_path: str) -> dict[str, float | int]:
+        """Get authoritative metadata from the completed recording, not a live listing."""
+        ffprobe = shutil.which("ffprobe")
+        if not ffprobe:
+            raise RuntimeError("ffprobe is required after a live capture; install the full ffmpeg package")
+        try:
+            completed = subprocess.run(
+                [
+                    ffprobe, "-v", "error", "-show_entries",
+                    "format=duration:stream=codec_type,width,height,avg_frame_rate",
+                    "-of", "json", media_path,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            info = json.loads(completed.stdout)
+        except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Could not read captured video metadata: {exc}") from exc
+
+        video = next(
+            (stream for stream in info.get("streams", []) if stream.get("codec_type") == "video"),
+            None,
+        )
+        duration = float((info.get("format") or {}).get("duration") or 0)
+        if not video or duration <= 0:
+            raise RuntimeError("Captured live stream has no readable video track")
+        fps_text = str(video.get("avg_frame_rate") or "0/1")
+        try:
+            numerator, denominator = fps_text.split("/", 1)
+            fps = float(numerator) / float(denominator)
+        except (ValueError, ZeroDivisionError):
+            fps = 0.0
+        width, height = int(video.get("width") or 0), int(video.get("height") or 0)
+        if fps <= 0 or width <= 0 or height <= 0:
+            raise RuntimeError("Captured live stream has incomplete video metadata")
+        return {"duration": duration, "fps": fps, "width": width, "height": height}
 
     def dependency_status(self) -> dict:
         return {
