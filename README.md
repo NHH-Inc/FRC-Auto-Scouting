@@ -21,7 +21,10 @@ shared surface and nothing in `/contracts/` changes without all three people agr
 | `docs/` | — | — | The four context documents |
 
 **New here?** Read `docs/HANDOFF.md` — it is the whole project in one file.
-**Just want to run it?** `.un.ps1 setup` then `.un.ps1 web`. Details in `docs/RUNNING.md`.
+**Hosting it, or wondering where videos and data live?** `docs/HOSTING.md`.
+**Just want to run it?** `.
+un.ps1 setup` then `.
+un.ps1 web`. Details in `docs/RUNNING.md`.
 
 ## Start here
 

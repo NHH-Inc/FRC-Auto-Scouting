@@ -1,5 +1,9 @@
 # One shared instance
 
+> Deciding *where* to host it, or wondering where the videos and images go?
+> **`docs/HOSTING.md`** answers that, including why the downloader wants a home
+> internet connection. This file is the mechanics once you have decided.
+
 How to run this so all three of us work against the same data instead of three separate copies.
 
 ---
