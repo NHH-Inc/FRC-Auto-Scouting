@@ -8,6 +8,7 @@ Progress arrives on stdout as one JSON object per line: {"progress": 0.42, "stag
 """
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -15,9 +16,25 @@ from pathlib import Path
 ANALYSIS_ERROR_CODES = {"analysis_failed", "timeout", "internal", "no_match_data"}
 
 
+def resolve_binary_path(binary_path: str) -> str:
+    """Use the Windows ``.exe`` that CMake produces without making Linux config Windows-only."""
+    path = Path(binary_path)
+    if os.name == "nt" and not path.suffix:
+        # Ninja/single-config builds use ``bin\\analysis.exe``; Visual Studio multi-config
+        # builds use ``bin\\Release\\analysis.exe``. The config stays portable either way.
+        candidates = (
+            path.with_suffix(".exe"),
+            path.parent / "Release" / f"{path.name}.exe",
+        )
+        for windows_binary in candidates:
+            if windows_binary.is_file():
+                return str(windows_binary)
+    return binary_path
+
+
 class AnalysisOrchestrator:
     def __init__(self, binary_path: str, output_base_dir: str = "/data/jobs"):
-        self.binary_path = binary_path
+        self.binary_path = resolve_binary_path(binary_path)
         self.output_base_dir = Path(output_base_dir)
 
     def run_job(self, job_data: dict, season_path: str, on_progress=None) -> dict:
