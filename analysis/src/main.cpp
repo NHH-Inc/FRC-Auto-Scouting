@@ -1,4 +1,4 @@
-// Component 1 entry point -- Contract D at SCHEMA_VERSION 2.
+// Component 1 entry point -- Contract D at SCHEMA_VERSION 3.
 //
 //     analysis --job <path/to/job.json> --season <path/to/season.json> --out <output/dir>
 //
@@ -10,6 +10,7 @@
 // The detection/tracking/OCR pipeline is not implemented yet. What is implemented is the
 // contract surface, so component 2 and component 3 can integrate against a real binary.
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -19,6 +20,9 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include <opencv2/core.hpp>
+#include <opencv2/videoio.hpp>
 
 #include "ContractModels.h"
 
@@ -148,20 +152,42 @@ int main(int argc, char* argv[]) {
         print_progress(0.80, frc::stage::kOcr);
         print_progress(0.95, frc::stage::kEvents);
 
-        // ---- TODO: the actual pipeline.
+        // ---- Pipeline proof.
         //
         // Detection (RF-DETR) -> ByteTrack -> homography -> bumper OCR -> event extraction.
         // Everything below is contract-shaped scaffolding so components 2 and 3 can integrate
-        // against a real binary; it does not look at the video yet.
+        // against a real binary. This first slice opens a real segment and decodes it;
+        // detection, tracking and OCR follow after this route is proven end-to-end.
         //
         // When it does: emit every skipped shot-change interval into the owning track's
         // `gaps`, and do NOT split the track at one -- re-identification exists to stitch
         // fragments into a single logical track.
 
+        cv::VideoCapture video(*job.local_path);
+        if (!video.isOpened()) {
+            return fail("Failed to open video: " + *job.local_path,
+                        frc::error_code::kVideoUnavailable);
+        }
+        cv::Mat frame;
+        int decoded_frames = 0;
+        int decoded_width = 0;
+        int decoded_height = 0;
+        while (video.read(frame) && !frame.empty()) {
+            if (decoded_frames == 0) {
+                decoded_width = frame.cols;
+                decoded_height = frame.rows;
+            }
+            ++decoded_frames;
+        }
+        if (decoded_width <= 0 || decoded_height <= 0 || decoded_frames <= 0) {
+            return fail("Video contains no decodable frames: " + *job.local_path,
+                        frc::error_code::kAnalysisFailed);
+        }
+
         std::vector<frc::Event> events;
         std::vector<frc::Track> tracks;
 
-        constexpr double kBoxSampleRate = 10.0;
+        constexpr double kBoxSampleRate = 1.0;
         const double match_start_t = 0.0;
 
         // One match-level event, to keep the output contract-valid rather than empty.
@@ -177,6 +203,26 @@ int main(int argc, char* argv[]) {
         start_event.source = "model";
         events.push_back(start_event);
 
+        // Diagnostic-only hand-placed box. It proves the complete path from a decoded video
+        // through tracks.jsonl, the database and the web overlay without pretending a detector
+        // exists. It is normalized from decoded pixel dimensions so this catches bad metadata
+        // and coordinate conversions before RF-DETR and ByteTrack are introduced.
+        constexpr double kDiagnosticBoxPixels = 64.0;
+        const double diagnostic_width_px = std::min(kDiagnosticBoxPixels, decoded_width / 4.0);
+        const double diagnostic_height_px = std::min(kDiagnosticBoxPixels, decoded_height / 4.0);
+        const double left_px = (decoded_width - diagnostic_width_px) / 2.0;
+        const double top_px = (decoded_height - diagnostic_height_px) / 2.0;
+        frc::Track diagnostic_track;
+        diagnostic_track.track_id = 0;
+        diagnostic_track.boxes.push_back({
+            match_start_t,
+            left_px / decoded_width,
+            top_px / decoded_height,
+            diagnostic_width_px / decoded_width,
+            diagnostic_height_px / decoded_height,
+        });
+        tracks.push_back(diagnostic_track);
+
         std::ofstream events_file(fs::path(out_dir) / "events.jsonl");
         for (const auto& e : events) {
             events_file << json(e).dump() << "\n";
@@ -189,11 +235,11 @@ int main(int argc, char* argv[]) {
 
         frc::RunResult result;
         result.job_id = job.job_id;
-        result.model_version = "scaffold-0.0.0";
+        result.model_version = "pipe-proof-0.1.0";
         result.box_sample_rate = kBoxSampleRate;
         result.homography_ok = false;
-        result.frames_total = static_cast<int>(*job.duration * *job.fps);
-        result.frames_analyzed = 0;
+        result.frames_total = decoded_frames;
+        result.frames_analyzed = 1;
         result.frames_skipped_shot_change = 0;
         result.tracks_emitted = static_cast<int>(tracks.size());
         result.events_emitted = static_cast<int>(events.size());

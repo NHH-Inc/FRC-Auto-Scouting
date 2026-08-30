@@ -4,6 +4,8 @@ import uuid
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import declarative_base
 
+from .serializers import SCHEMA_VERSION
+
 Base = declarative_base()
 
 
@@ -18,7 +20,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     job_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    schema_version = Column(Integer, default=2, nullable=False)
+    schema_version = Column(Integer, default=SCHEMA_VERSION, nullable=False)
     # Nullable on purpose: Contract E says an unresolved match comes back as null. Never the
     # string "unknown" -- that is not a valid TBA key and every unresolved job would collide.
     match_id = Column(String, nullable=True, index=True)
@@ -62,7 +64,7 @@ class Event(Base):
     __tablename__ = "events"
 
     event_id = Column(String, primary_key=True)
-    schema_version = Column(Integer, default=2, nullable=False)
+    schema_version = Column(Integer, default=SCHEMA_VERSION, nullable=False)
     job_id = Column(String, ForeignKey("jobs.job_id"), index=True)
     match_id = Column(String, index=True)
     team = Column(Integer, nullable=True)
@@ -116,7 +118,7 @@ class Correction(Base):
     __tablename__ = "corrections"
 
     correction_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    schema_version = Column(Integer, default=2, nullable=False)
+    schema_version = Column(Integer, default=SCHEMA_VERSION, nullable=False)
     scope = Column(String, nullable=False, default="event")  # event | track
     job_id = Column(String, index=True, nullable=True)
     target_id = Column(String, index=True, nullable=False)

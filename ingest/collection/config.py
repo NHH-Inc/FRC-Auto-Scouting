@@ -36,7 +36,7 @@ class CollectionConfig:
 
     @property
     def jpeg_quality(self) -> int:
-        return int(self.raw["sampling"].get("jpeg_quality", 95))
+        return int(self.raw["sampling"].get("jpeg_quality", 85))
 
     @property
     def classes(self) -> list[str]:
@@ -53,7 +53,7 @@ class CollectionConfig:
 
     @property
     def iou_threshold(self) -> float:
-        return float(self.raw.get("ollama", {}).get("iou_threshold", 0.50))
+        return float(self.raw.get("ollama", {}).get("iou_threshold", 0.40))
 
     @property
     def digest(self) -> str:
@@ -79,7 +79,7 @@ def load_config(path: str | Path) -> CollectionConfig:
     names = [item.get("name") for item in classes if isinstance(item, dict)]
     if len(names) != len(classes) or len(set(names)) != len(names):
         raise ValueError("Every class needs a unique name")
-    threshold = float(data.get("ollama", {}).get("iou_threshold", 0.5))
+    threshold = float(data.get("ollama", {}).get("iou_threshold", 0.4))
     if not 0 < threshold <= 1:
         raise ValueError("ollama.iou_threshold must be in (0, 1]")
     return CollectionConfig(data)

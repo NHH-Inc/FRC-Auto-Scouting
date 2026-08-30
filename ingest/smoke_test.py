@@ -289,6 +289,10 @@ def main():
     })
     check("POST /api/events", r.status_code == 200, r.text[:160])
     check("manual event id is a UUID", len(r.json()["event_id"]) == 36)
+    check("manual event carries the current schema_version",
+          r.json().get("schema_version") == declared, str(r.json())[:160])
+    check("manual event carries its correction id",
+          bool(r.json().get("correction_id")), str(r.json())[:160])
     check("manual event is NOT in raw output",
           len(client.get(f"/api/matches/{MATCH}/events?raw=true").json()["events"]) == raw_count)
 

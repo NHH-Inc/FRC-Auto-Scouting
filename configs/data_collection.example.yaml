@@ -8,7 +8,7 @@ storage:
 sampling:
   fps: 2.0
   image_format: jpg
-  jpeg_quality: 95
+  jpeg_quality: 85
   include_endpoints: true
 split:
   seed: 20260829
@@ -26,4 +26,4 @@ ollama:
     - qwen3-vl:4b
     - qwen2.5vl:7b
     - gemma3:4b
-  iou_threshold: 0.50
+  iou_threshold: 0.40

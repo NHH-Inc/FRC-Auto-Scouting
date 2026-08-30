@@ -39,7 +39,7 @@ ollama:
     - qwen3-vl:4b
     - qwen2.5vl:7b
     - gemma3:4b
-  iou_threshold: 0.50
+  iou_threshold: 0.40
 ```
 
 `auto-label` sends each frame to the configured `/api/chat` endpoint as a base64 image with a JSON
@@ -90,7 +90,8 @@ labels. Use `--limit 1` for a quick end-to-end test.
 
 Model-reported confidence is not calibrated across families. Use overlap only as a review-order hint,
 not as proof that a box is correct. Empty consensus means the frame needs manual inspection; it does
-not mean that no robot is present.
+not mean that no robot is present. The saved consensus box is one actual proposal from the
+most-confident supporting model, never an average of coordinates.
 
 ## Where data is written
 
@@ -146,6 +147,14 @@ data/segments/<video>.mp4
 Until the annotation import and dataset exporter are implemented, use `model-consensus.jsonl` to
 prioritize manual review and `model-proposals.jsonl` to compare or audit individual models. Do not
 rename either file to `annotations.jsonl`: reviewed annotations are a separate ground-truth artifact.
+
+## Check whether Gemma is a real third vote
+
+Run the normal annotation command with `--limit 50`, then open `model-comparison.json`. For each
+model it records `decisive_two_model_votes`: a consensus box that would disappear if that model
+were removed. If Gemma's number is consistently near zero, the two Qwen models are effectively
+deciding every 2-of-3 result and Gemma is not contributing useful diversity. Keep the raw proposals
+either way; this is a measurement, not a reason to silently rewrite labels.
 
 Completed collections can be copied to the shared artifact store described in the data-collection
 design plan. Preserve the entire collection directory so its checksums and provenance travel with

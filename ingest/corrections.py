@@ -1,4 +1,4 @@
-"""The corrections layer, SCHEMA_VERSION 2.
+"""The corrections layer, SCHEMA_VERSION 3.
 
 Doc 0, three times over:
 
@@ -15,7 +15,7 @@ If this module is ever bypassed and an event row is UPDATEd in place, the origin
 is gone permanently -- a correction records the new value, not the old one.
 """
 
-from .serializers import event_to_dict, track_to_dict
+from .serializers import SCHEMA_VERSION, event_to_dict, track_to_dict
 
 
 def _sorted(corrections):
@@ -57,7 +57,7 @@ def apply_corrections(events, corrections) -> list[dict]:
         if action == "create":
             fields = dict(correction.fields or {})
             fields["event_id"] = target
-            fields.setdefault("schema_version", 2)
+            fields.setdefault("schema_version", SCHEMA_VERSION)
             fields.setdefault("source", "manual")
             fields["corrected"] = True
             fields["correction_id"] = correction.correction_id

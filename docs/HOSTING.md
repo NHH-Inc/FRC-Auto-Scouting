@@ -228,6 +228,38 @@ but the host.
 
 ## 6. What I'd actually do, in order
 
+## Team operating plan — use this now
+
+This is the concrete answer for the hardware the team has. It intentionally separates a shared
+**service of record** from the machines that do expensive work.
+
+| Responsibility | Where it runs | Why |
+|---|---|---|
+| Shared results, corrections, jobs | **One Supabase Postgres project** | It is the small, irreplaceable data set. The free tier includes a dedicated Postgres database with a 500 MB limit, which is far beyond this project's expected records. |
+| Downloading YouTube and the ingest service | **Justin's home PC, while it is needed** | Residential internet avoids the datacenter-IP YouTube problem. Justin already has the disk and can run the service. |
+| C++ analysis | **Justin's home PC first; Robert's 3060 when GPU inference exists** | The current OpenCV proof is CPU work. Robert's NVIDIA GPU is the right first place for RF-DETR/ONNX work. |
+| Detector training | **Robert's RTX 3060 12 GB** | CUDA works on Windows and 12 GB is enough for the planned 640px detector run. |
+| Large, permissioned labeling batches | **Robotics-room PCs, after school only** | Use them only after a teacher authorizes software installation, offline input transfer, and after-hours use. They are workers, not a server. |
+| Reviewed detector dataset | **Roboflow** | It is the review tool and dataset source. Do not use Drive as the live dataset filesystem. |
+| Database backup | **One scheduled `pg_dump` file in Drive** | Drive is good for one small backup file; it is not good for hundreds of thousands of training images. |
+
+**What to set up first:** Justin creates or is invited to one Supabase project; Robert is also an
+owner. Put its pooled Postgres connection string only in the machine that runs ingest:
+
+```text
+DATABASE_URL=postgresql://...sslmode=require
+```
+
+That makes the database central immediately. It does **not** make the website permanently online:
+the present code streams video from the same disk as the ingest service, so the site is available
+only while that home worker is running. Tailscale is the safe way for teammates to reach it without
+opening router ports. A 24/7 public site is a later project requiring object storage (R2 or similar)
+and a worker/queue; do not put YouTube cookies on a rented server.
+
+If the Supabase free project pauses after inactivity, wake it before an event and rely on the Drive
+backup as the recovery path. The official free tier currently includes a 500 MB database and pauses
+after a week of inactivity; check the provider's current limits before committing team money.
+
 1. **Set up Neon or Supabase now** and put the connection string in the host's `.env`. Thirty
    minutes, free, and the data immediately stops depending on one laptop. This is Option B.
 2. **Keep downloading and analysing at home.** It works, it is free, and it dodges the

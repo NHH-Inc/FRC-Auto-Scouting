@@ -1,4 +1,4 @@
-// The fixture client, SCHEMA_VERSION 2.
+// The fixture client, SCHEMA_VERSION 3.
 //
 // Doc 0: "Component 3 builds the whole UI against fixture data with no backend running."
 // Same ScoutingApi as the HTTP client, backed by /fixtures/. Not a mock in the testing sense

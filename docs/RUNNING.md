@@ -51,7 +51,7 @@ Be clear on this before you go looking for a command that is not there.
 | 3. Label frames with the 3 local models | **works** | Part 4 |
 | 4. Human review of those labels | **not built** | Roboflow, decided but not set up |
 | 5. Train a detector | **not built** | no training code exists yet |
-| 6. Analyse a match (the C++ backend) | **not built** | binary compiles, finds nothing |
+| 6. Analyse a match (the C++ backend) | **pipeline proof only** | opens the real MP4, counts frames, and emits one diagnostic box; it does not detect robots yet |
 | 7. Review results in the web app | **works** | Part 2 |
 
 So: **there is no "run the training" command**, because nobody has written a trainer. Steps 1–3
@@ -160,9 +160,9 @@ Now paste a YouTube link into the sidebar. The job walks
 `queued → downloading → downloaded → analyzing → complete`, and **the player opens as soon as the
 download finishes** — you do not wait for analysis.
 
-**Analysis will fail**, with `error_code: analysis_failed`. That is correct today: the download
-and the player work, but the C++ backend has no detection pipeline, so there is nothing to find.
-You will see the video and no boxes.
+**Analysis now proves the full media path**: it opens the downloaded MP4 with OpenCV, counts real
+frames, and emits one clearly diagnostic hand-placed box. That confirms download → binary → API →
+overlay. It is **not robot detection** and must not be used as scouting data until the detector lands.
 
 Videos that need a login:
 
@@ -253,7 +253,7 @@ steps 3 and 4 are for.
 
 ## Verifying nothing is broken
 
-Run before pushing. CI runs the same four things.
+Run before pushing. `run.ps1 check` runs the same web, ingest, fixture, and C++ checks as CI.
 
 ```bash
 # in: REPO\web
@@ -271,17 +271,26 @@ npm run validate:fixtures
 | Command | What it actually checks |
 |---|---|
 | `validate:fixtures` | Every fixture record against `contracts\*.schema.json`, cross-file invariants, and the five required awkward cases |
-| `smoke_test` | 69 checks driving every Contract E endpoint against the fixtures — no network, no yt-dlp, no analysis binary |
+| `smoke_test` | 71 checks driving every Contract E endpoint against the fixtures — no network, no yt-dlp, no analysis binary |
 | `pytest` | Downloader, collection and API unit tests |
+| `analysis` | Opens the fixture MP4 with OpenCV, counts its decodable frames, emits the diagnostic track, and checks Contract D output |
 
-**The C++** is built by CI, so nobody needs a local toolchain. To build it yourself you need
-CMake and a compiler:
+**The C++ pipeline proof** is part of `run.ps1 check`. On Windows, install Visual Studio Build
+Tools with the **Desktop development with C++** workload, CMake, and OpenCV through vcpkg:
 
 ```bash
 # in: REPO
-cmake -S analysis -B analysis\build
+# once, from a Developer PowerShell with vcpkg installed
+vcpkg install opencv4[ffmpeg] onnxruntime:x64-windows
+
+# in: REPO; replace C:\vcpkg with your vcpkg folder
+cmake -S analysis -B analysis\build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
 cmake --build analysis\build --config Release
 ```
+
+OpenCV is linked now for the video pipe proof. ONNX Runtime is installed and ready for the next
+step, but intentionally is not linked until the RF-DETR inference module exists; the plumbing proof
+should not depend on an unused runtime.
 
 **Regenerating fixtures.** Deterministic, so a clean regeneration changes nothing and CI fails
 if it does:

@@ -31,7 +31,7 @@ un.ps1 web`. Details in `docs/RUNNING.md`.
 1. `docs/frc-scouting-0-contract.md` — read before anything else
 2. `contracts/README.md` — the schemas, and what changed when the three contract sets merged
 3. `contracts/OPEN_QUESTIONS.md` — all thirteen v1 questions are resolved in
-   SCHEMA_VERSION 2; this is where the next one gets raised
+   SCHEMA_VERSION 3; this is where the next one gets raised
 4. `fixtures/README.md` — the one worked example every component builds against
 5. `docs/media-streaming.md` — ad-free preview behavior and the media/time contract for models
 
@@ -124,5 +124,5 @@ them, degrading rather than failing.
 ## Checks
 
     cd web && npm run typecheck && npm run build && npm run validate:fixtures
-    ingest\.venv\Scripts\python -m ingest.smoke_test     # 67 Contract E checks
+    ingest\.venv\Scripts\python -m ingest.smoke_test     # 71 Contract E checks
     ingest\.venv\Scripts\python -m pytest ingest/tests -q

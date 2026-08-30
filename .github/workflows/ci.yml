@@ -20,6 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install OpenCV
+        run: sudo apt-get update && sudo apt-get install -y libopencv-dev
+
       - name: Configure
         run: cmake -S analysis -B analysis/build -DCMAKE_BUILD_TYPE=Release
 
@@ -32,7 +35,9 @@ jobs:
         run: |
           set -e
           BIN=$(find analysis/build -name analysis -type f -perm -u+x | head -1)
+          EXPECTED_SCHEMA_VERSION=$(tr -d '[:space:]' < contracts/SCHEMA_VERSION)
           echo "binary: $BIN"
+          echo "schema version: $EXPECTED_SCHEMA_VERSION"
 
           echo "-- missing arguments must exit nonzero"
           if "$BIN" --job nope.json --out /tmp/out; then
@@ -41,7 +46,18 @@ jobs:
 
           echo "-- runs against the golden fixture"
           mkdir -p /tmp/out
-          "$BIN" --job fixtures/2026casf_qm42/job.json \
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          job = json.load(open("fixtures/2026casf_qm42/job.json"))
+          job["local_path"] = str(Path("fixtures/2026casf_qm42/segment.mp4").resolve())
+          # The binary must measure the file, not trust pre-filled downloader metadata.
+          job.update({"duration": 1, "fps": 1, "width": 1, "height": 1})
+          json.dump(job, open("/tmp/job.json", "w"))
+          PY
+
+          "$BIN" --job /tmp/job.json \
                  --season contracts/seasons/2026.json \
                  --out /tmp/out
           test -f /tmp/out/events.jsonl
@@ -49,8 +65,8 @@ jobs:
           test -f /tmp/out/result.json
 
           echo "-- result.json carries Contract D's pinned keys"
-          python3 - <<'PY'
-          import json
+          EXPECTED_SCHEMA_VERSION="$EXPECTED_SCHEMA_VERSION" python3 - <<'PY'
+          import json, os
           r = json.load(open("/tmp/out/result.json"))
           required = {
               "schema_version", "job_id", "model_version", "box_sample_rate", "homography_ok",
@@ -60,13 +76,27 @@ jobs:
           }
           missing = required - set(r)
           assert not missing, f"result.json missing {sorted(missing)}"
-          assert r["schema_version"] == 2, r["schema_version"]
+          assert r["schema_version"] == int(os.environ["EXPECTED_SCHEMA_VERSION"]), r["schema_version"]
+          assert r["frames_total"] > 1, r
+          assert r["frames_analyzed"] == 1, r
+          assert r["tracks_emitted"] == 1, r
           print("result.json ok")
           PY
 
-          echo "-- emitted events satisfy Contract B"
+          echo "-- real-video plumbing emits a diagnostic track"
           python3 - <<'PY'
           import json
+          rows = [json.loads(l) for l in open("/tmp/out/tracks.jsonl") if l.strip()]
+          assert len(rows) == 1, rows
+          assert len(rows[0]["boxes"]) == 1, rows
+          box = rows[0]["boxes"][0]
+          assert all(0.0 <= box[key] <= 1.0 for key in ("x", "y", "w", "h")), box
+          print("diagnostic track ok")
+          PY
+
+          echo "-- emitted events satisfy Contract B"
+          EXPECTED_SCHEMA_VERSION="$EXPECTED_SCHEMA_VERSION" python3 - <<'PY'
+          import json, os
           rows = [json.loads(l) for l in open("/tmp/out/events.jsonl") if l.strip()]
           assert rows, "no events emitted"
           required = {
@@ -76,7 +106,7 @@ jobs:
           for e in rows:
               missing = required - set(e)
               assert not missing, f"event missing {sorted(missing)}"
-              assert e["schema_version"] == 2
+              assert e["schema_version"] == int(os.environ["EXPECTED_SCHEMA_VERSION"])
               # Nullable fields must be PRESENT as null, not dropped -- this is what the
               # std::optional adl_serializer exists to guarantee.
               if e["event_type"] in {"match_start", "match_end", "phase_change"}:

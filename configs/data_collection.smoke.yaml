@@ -8,7 +8,7 @@ storage:
 sampling:
   fps: 0.02
   image_format: jpg
-  jpeg_quality: 95
+  jpeg_quality: 85
   include_endpoints: true
 split:
   seed: 20260829
@@ -23,4 +23,4 @@ quality:
 ollama:
   url: http://127.0.0.1:11434
   models: [qwen3-vl:4b, qwen2.5vl:7b, gemma3:4b]
-  iou_threshold: 0.50
+  iou_threshold: 0.40

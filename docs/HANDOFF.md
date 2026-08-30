@@ -42,14 +42,14 @@ row that is wrong; they have been corrected, but if you find that row anywhere e
 | Ingest: yt-dlp, TBA, job queue, database, full Contract E API | **works** | Robert |
 | Ollama labelling ensemble (3 local vision models, IoU consensus) | **works** | Robert |
 | Google Sheets export | **works**, needs a service account JSON | Robert |
-| **Analysis backend: detection, tracking, OCR** | **contract surface only — finds nothing** | **Robert** |
+| **Analysis backend: detection, tracking, OCR** | **real-video pipe proof; no detector yet** | **Robert** |
 | Human review of auto-labels | **not built** | Robert |
 | Detector training | **not built** | Robert |
 
-**The critical path is the analysis backend.** Its binary compiles, satisfies Contract D, and
-emits contract-valid output — but there is no detection pipeline inside it, so a real job runs to
-`analysis_failed` and the player shows video with no boxes. Everything downstream is running on
-synthetic fixture data until that lands.
+**The critical path is the analysis backend.** The binary now opens a real segment with OpenCV,
+counts decoded frames, and emits one explicit diagnostic hand-placed track. That validates ingest
+→ binary → database → API → overlay. There is still no detection pipeline; the diagnostic box is
+not scouting output and must be replaced by the detector/tracker path.
 
 Nathaniel originally owned component 1; he is busy, so **Robert now owns components 1 and 2.**
 
@@ -267,6 +267,6 @@ Verification, all of which CI also runs:
 .\run.ps1 check
 ```
 
-That is 69 Contract E checks against the fixtures, 12 unit tests, 243 fixture records validated
+That is 71 Contract E checks against the fixtures, 12 unit tests, 243 fixture records validated
 against the schemas, a typecheck, a build, and a check that regenerating the fixtures changes
 nothing. If it is green, you have not broken the contract.

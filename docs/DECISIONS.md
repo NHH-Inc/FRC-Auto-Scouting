@@ -185,9 +185,9 @@ unreasonable answer right now. What is settled: RF-DETR on Robert's 12 GB card, 
 review on Roboflow, detector and team-ID classifier trained separately from different data.
 
 **P2 — Component 1 is the critical path.** `open`
-The analysis binary compiles and satisfies Contract D, but has no detection pipeline, so a real
-job runs to `analysis_failed` and the player shows video with no boxes. Everything downstream is
-running on fixtures until this lands.
+The OpenCV pipe proof now opens a real segment, counts decoded frames, and emits one diagnostic
+track through the overlay. Detection, tracking, OCR, and events are still not built, so this is a
+plumbing milestone rather than usable scouting output. The detector remains the critical path.
 
 ## Ownership
 

@@ -1,4 +1,4 @@
-// Contract E response shapes, SCHEMA_VERSION 2.
+// Contract E response shapes, SCHEMA_VERSION 3.
 //
 // These were assumptions in v1 and are now written out in doc 0, so this file transcribes
 // rather than guesses. Collection endpoints return an OBJECT, never a bare array -- that is

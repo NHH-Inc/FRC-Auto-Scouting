@@ -25,6 +25,8 @@ class CollectionTests(unittest.TestCase):
         result = compare_frame_proposals(proposals, ["a", "b", "c"], .5)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["agreement_count"], 2)
+        self.assertEqual(result[0]["representative_model"], "a")
+        self.assertEqual(result[0]["x"], .1)
         self.assertTrue(result[0]["human_review_required"] if "human_review_required" in result[0] else True)
 
 

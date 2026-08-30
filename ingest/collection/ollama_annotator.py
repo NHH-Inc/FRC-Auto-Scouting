@@ -176,6 +176,10 @@ def compare_frame_proposals(
         count = len(supporting_models)
         if count < 2:
             continue
+        # Agreement decides whether a cluster survives. It does NOT average coordinates: a
+        # missing or badly localized proposal would drag an averaged box onto empty carpet.
+        # Keep a real proposal (the most confident member) as the representative instead.
+        representative = max(cluster, key=lambda item: item["confidence"])
         pairwise = [
             _iou(cluster[index], cluster[other])
             for index in range(len(cluster))
@@ -183,11 +187,12 @@ def compare_frame_proposals(
         ]
         output.append({
             "class_name": "robot",
-            "x": round(sum(item["x"] for item in cluster) / len(cluster), 6),
-            "y": round(sum(item["y"] for item in cluster) / len(cluster), 6),
-            "w": round(sum(item["w"] for item in cluster) / len(cluster), 6),
-            "h": round(sum(item["h"] for item in cluster) / len(cluster), 6),
-            "confidence": round(sum(item["confidence"] for item in cluster) / len(cluster), 6),
+            "x": representative["x"],
+            "y": representative["y"],
+            "w": representative["w"],
+            "h": representative["h"],
+            "confidence": representative["confidence"],
+            "representative_model": representative["model"],
             "supporting_models": supporting_models,
             "agreement_count": count,
             "agreement_ratio": round(count / len(models), 6),
@@ -218,16 +223,23 @@ def build_consensus(collection: Path, models: list[str], threshold: float) -> Pa
         })
     output = collection / "model-consensus.jsonl"
     _write_jsonl(output, rows)
+    all_boxes = [box for row in rows for box in row["boxes"]]
     per_model = {
         model: {
             "frames_run": sum(row.get("model") == model for row in proposal_rows),
             "boxes_proposed": sum(
                 len(row.get("boxes", [])) for row in proposal_rows if row.get("model") == model
             ),
+            # This consensus box would disappear if this model were removed.
+            "decisive_two_model_votes": sum(
+                model in box["supporting_models"] and box["agreement_count"] == 2
+                for box in all_boxes
+            ),
+            "consensus_boxes_supported": sum(model in box["supporting_models"] for box in all_boxes),
+            "representative_boxes": sum(box["representative_model"] == model for box in all_boxes),
         }
         for model in models
     }
-    all_boxes = [box for row in rows for box in row["boxes"]]
     summary = {
         "annotator_version": OLLAMA_ANNOTATOR_VERSION,
         "generated_at": _utc_now(),
@@ -238,6 +250,10 @@ def build_consensus(collection: Path, models: list[str], threshold: float) -> Pa
         "consensus_boxes": len(all_boxes),
         "unanimous_boxes": sum(box["agreement_count"] == len(models) for box in all_boxes),
         "frames_with_consensus": sum(bool(row["boxes"]) for row in rows),
+        "how_to_read_this": (
+            "Compare decisive_two_model_votes across models on a 50-frame run. A low value for "
+            "one model means it rarely changes a 2-of-3 consensus and is not adding a real vote."
+        ),
         "human_review_required": True,
         "warning": "Model agreement is a review-priority signal, not ground-truth verification.",
     }

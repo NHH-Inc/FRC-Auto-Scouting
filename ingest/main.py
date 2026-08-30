@@ -575,7 +575,7 @@ def create_manual_event(event_data: dict, db: Session = Depends(get_db)):
 
     # event_id is a UUIDv4 per doc 0's identifier table.
     event_id = str(uuid.uuid4())
-    fields = {**payload, "event_id": event_id, "schema_version": 2}
+    fields = {**payload, "event_id": event_id, "schema_version": SCHEMA_VERSION}
     correction_id = str(uuid.uuid4())
 
     db.add(

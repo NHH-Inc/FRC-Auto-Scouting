@@ -170,14 +170,84 @@ function Invoke-Check {
         # The generator is deterministic, so regenerating must change nothing. Catches anyone
         # hand-editing golden data instead of changing the generator.
         Say 'fixtures  -  reproducible?'
-        Invoke-Native { node fixtures\tools\generate_fixture.mjs --no-video } | Out-Null
-        git diff --quiet -- fixtures
-        if ($LASTEXITCODE -ne 0) {
-            Bad 'regenerating changed the fixtures'
-            git --no-pager diff --stat -- fixtures
-            $failed += 'fixture reproducibility'
+        $code = Invoke-Native { node fixtures\tools\generate_fixture.mjs --no-video }
+        if ($code -ne 0) {
+            Bad 'fixture generator failed'
+            $failed += 'fixture generation'
         }
-        else { Ok 'fixtures reproduce byte-for-byte' }
+        else {
+            git diff --quiet -- fixtures
+            if ($LASTEXITCODE -ne 0) {
+                Bad 'regenerating changed the fixtures'
+                git --no-pager diff --stat -- fixtures
+                $failed += 'fixture reproducibility'
+            }
+            else { Ok 'fixtures reproduce byte-for-byte' }
+        }
+
+        Say 'analysis  -  configure, build and real-video smoke test'
+        if (-not (Have 'cmake')) {
+            Bad 'cmake is required for .\run.ps1 check; see docs\RUNNING.md'
+            $failed += 'analysis toolchain'
+        }
+        else {
+            $analysisDir = Join-Path $Repo 'analysis'
+            $analysisBuild = Join-Path $analysisDir 'build'
+            $code = Invoke-Native { cmake -S $analysisDir -B $analysisBuild }
+            if ($code -ne 0) {
+                $failed += 'analysis configure'
+            }
+            else {
+                $code = Invoke-Native { cmake --build $analysisBuild --config Release }
+                if ($code -ne 0) {
+                    $failed += 'analysis build'
+                }
+                else {
+                    $binary = Get-ChildItem -LiteralPath (Join-Path $analysisBuild 'bin') -Recurse -File |
+                        Where-Object { $_.Name -in @('analysis.exe', 'analysis') } |
+                        Select-Object -First 1
+                    if (-not $binary) {
+                        Bad 'analysis binary was not produced'
+                        $failed += 'analysis smoke test'
+                    }
+                    else {
+                        $fixtureJob = Get-Content (Join-Path $Repo 'fixtures\2026casf_qm42\job.json') -Raw |
+                            ConvertFrom-Json
+                        $fixtureJob.local_path = (Resolve-Path (Join-Path $Repo 'fixtures\2026casf_qm42\segment.mp4')).Path
+                        # Prove the binary reads the video itself rather than trusting job metadata.
+                        $fixtureJob.duration = 1
+                        $fixtureJob.fps = 1
+                        $fixtureJob.width = 1
+                        $fixtureJob.height = 1
+                        $tempJob = Join-Path ([System.IO.Path]::GetTempPath()) 'frc-scouting-analysis-job.json'
+                        $tempOut = Join-Path ([System.IO.Path]::GetTempPath()) 'frc-scouting-analysis-out'
+                        $fixtureJob | ConvertTo-Json -Depth 10 | Set-Content -Path $tempJob -Encoding utf8
+                        New-Item -ItemType Directory -Force -Path $tempOut | Out-Null
+                        $code = Invoke-Native {
+                            & $binary.FullName --job $tempJob --season (Join-Path $Repo 'contracts\seasons\2026.json') --out $tempOut
+                        }
+                        $expectedVersion = [int]((Get-Content (Join-Path $Repo 'contracts\SCHEMA_VERSION') -Raw).Trim())
+                        $resultPath = Join-Path $tempOut 'result.json'
+                        $tracksPath = Join-Path $tempOut 'tracks.jsonl'
+                        if ($code -ne 0 -or -not (Test-Path $resultPath) -or -not (Test-Path $tracksPath)) {
+                            Bad 'analysis smoke test did not produce Contract D output'
+                            $failed += 'analysis smoke test'
+                        }
+                        else {
+                            $result = Get-Content $resultPath -Raw | ConvertFrom-Json
+                            $tracks = @(Get-Content $tracksPath | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+                            if ($result.schema_version -ne $expectedVersion -or $result.frames_total -le 1 -or
+                                $result.frames_analyzed -ne 1 -or $tracks.Count -ne 1 -or
+                                $tracks[0].boxes.Count -ne 1) {
+                                Bad 'analysis smoke output is not the expected real-video proof'
+                                $failed += 'analysis smoke test'
+                            }
+                            else { Ok 'analysis real-video smoke test' }
+                        }
+                    }
+                }
+            }
+        }
     }
     finally { Pop-Location }
 
@@ -233,8 +303,8 @@ function Invoke-Full {
     }
 
     Say 'Web app  -  http://localhost:5173' 'Green'
-    Write-Host '  Analysis will report analysis_failed until component 1 has a detection pipeline.'
-    Write-Host '  The download and the player both work; the boxes are what is missing.'
+    Write-Host '  Analysis currently proves the pipe with one diagnostic box, not real robot detection.'
+    Write-Host '  The download, player, and overlay work; do not use diagnostic output as scouting data.'
     Push-Location $Web
     try { npm run dev } finally { Pop-Location }
 }
