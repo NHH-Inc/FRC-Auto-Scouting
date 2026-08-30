@@ -66,12 +66,20 @@ def _classify(exc: Exception) -> str:
 
 # The web dev server runs on 5173 (doc 0 default). Vite proxies /api in dev, but a build
 # served from anywhere else talks to this directly.
+# Same-origin needs no CORS: `run.ps1 serve` has this service hand out the built UI, which is
+# the recommended setup. These origins only matter when someone runs a separate Vite dev server,
+# including from another machine -- add theirs to FRC_CORS_ORIGINS, comma separated.
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get(
+        "FRC_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

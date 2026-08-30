@@ -83,7 +83,9 @@ client uses.
   exit code 0.
 
 `docs/RUNNING.md` has the long version, including the Ollama labelling workflow and
-troubleshooting.
+troubleshooting. `docs/CENTRAL-SETUP.md` covers running one shared instance the whole team
+works against — short version: **one ingest service, everyone else opens a URL**, and nobody
+but the host needs a `.env` or database access.
 
 ---
 
