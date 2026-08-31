@@ -13,7 +13,7 @@ they are right.** Nothing else is blocked on you until that is finished.
 | Step | Who | Status |
 |---|---|---|
 | 1.1 Download match videos | Justin | done — 10 matches, 10 different events, 2026 REBUILT season |
-| 1.2 Extract frames + model proposals | Justin | done — 557 frames, three vision models each proposed boxes |
+| 1.2 Extract frames + model proposals | Justin | done — 554 frames, one vision model proposed boxes |
 | 1.3 Package as COCO | Justin | done — `data/datasets/robot-poc-v1/` |
 | **1.4 Review the boxes** | **you** | **← you are here** |
 | 1.5 Train RF-DETR | you | after 1.4 |
@@ -23,6 +23,30 @@ The ten matches come from ten different events on purpose. Frames from one match
 the same train/valid/test split, so each match is one indivisible group — and ten venues means ten
 different lighting setups, camera operators and field conditions, which is what stops the detector
 from memorising one arena.
+
+## What you are actually getting
+
+Measured across all 10 matches, not estimated:
+
+| | |
+|---|---|
+| Frames to review | **554** |
+| Frames with at least one proposed box | 496 (89%) |
+| **Frames with nothing on them** | **58 (10%)** — you draw these from scratch |
+| Proposed boxes total | 2843 |
+| Distinct boxes | 2087 of 2843 — real variety, not one guess repeated |
+| Median box size | 3.8% of frame |
+| Median aspect ratio | 0.63 (taller than wide, as robots are) |
+| Model calls that failed outright | 3 |
+
+The most common non-empty answer is **6 boxes on a frame**, which is exactly how many robots are
+on an FRC field — a sign the model is genuinely looking at least some of the time. 89% of frames
+came back with something on them, and 2,087 of the 2,843 boxes are distinct, so this is not one
+guess stamped everywhere.
+
+That said, **none of it is verified.** Expect wrong boxes, boxes on the score overlay, missed
+robots, and the occasional frame with an absurd count. The proposals are a head start on drawing,
+not a first pass at correctness — your job is still to check every one.
 
 ## Read this before you start clicking
 
@@ -66,24 +90,30 @@ data\datasets\robot-poc-v1-reviewed\valid\_annotations.coco.json
 
 ## What the proposals actually are
 
-Three local vision models (`qwen3-vl:4b`, `qwen2.5vl:7b`, `gemma3:4b`) each looked at every frame
-and guessed. Where they agreed — boxes overlapping by 40% or more — that became the consensus
-draft you are reviewing.
+**One** local vision model (`gemma3:4b`) looked at every frame and guessed. The three-model
+ensemble was the plan, but it projects to 42 hours on one machine — see [PLAN.md](PLAN.md).
+So there is no agreement signal here: every box carries `agreement_count: 1` and
+`source: "model_single"`, meaning one model's unverified opinion.
 
 **They are guesses.** Every row is marked `human_review_required: true`. Expect them to be wrong
 often; the point is that fixing a rough box is faster than drawing one from nothing.
 
-Two things worth knowing:
+Why only one model, when the design called for three:
 
-- Some frames have proposals from only two models. `qwen2.5vl:7b` sometimes falls into a
-  repetition loop — emitting the same box over and over until it hits the token limit and the
-  JSON truncates. Those are recorded as `status: "failed"` with empty boxes and excluded from the
-  vote, so a failure never counts as "this model saw no robots". The frame is still perfectly
-  usable; it just had a two-model panel.
-- `gemma3:4b` may not be earning its slot. It takes image input but is not trained for bounding-box
-  grounding the way the two Qwen models are — and those two are the same family, so gemma3 carries
-  all the actual diversity in the ensemble. `model-comparison.json` in each collection has the
-  numbers. Worth 20 minutes of your time at some point, but not before the review.
+- `qwen2.5vl:7b` takes 95s per frame **and fails constantly** — it falls into a repetition loop,
+  emitting the same box until it hits the token limit and truncates its own JSON. Even with a
+  retry on a different seed it mostly does not recover.
+- `qwen3-vl:4b` works but takes 63s per frame.
+- `gemma3:4b` takes 17s and is reliable.
+
+All three across these frames projects to **42 hours**. One model did it in 77 minutes. Three of
+2,843 calls failed outright, and those are recorded as `status: "failed"` with empty boxes rather
+than being silently dropped.
+
+The irony is worth knowing before you trust anything: the docs single out `gemma3:4b` as the
+model *least* suited to box grounding, and it is the only one that finishes on one machine. If
+the classroom PCs come through, running the real three-model ensemble across them is exactly what
+they would be good for — and then agreement between models would actually mean something.
 
 ## Then train
 
