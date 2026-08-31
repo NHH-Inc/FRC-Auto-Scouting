@@ -14,6 +14,10 @@ from typing import Any
 
 from . import OLLAMA_ANNOTATOR_VERSION
 
+#: Fixed so a rerun reproduces byte-for-byte. The retry uses DEFAULT_SEED + 1, which is still
+#: deterministic -- a second fixed draw, not randomness.
+DEFAULT_SEED = 20260829
+
 
 BOX_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -101,6 +105,7 @@ def annotate_image(
     url: str,
     timeout: float = 600,
     keep_alive: str = "0",
+    seed: int = DEFAULT_SEED,
 ) -> dict[str, Any]:
     """Ask one model for robot boxes on one frame.
 
@@ -125,7 +130,7 @@ def annotate_image(
         "stream": False,
         "think": False,
         "format": BOX_SCHEMA,
-        "options": {"temperature": 0, "seed": 20260829},
+        "options": {"temperature": 0, "seed": seed},
         "keep_alive": keep_alive,
     }
     request = urllib.request.Request(
@@ -321,9 +326,25 @@ def annotate_collection(
             if key in existing:
                 continue
             print(f"{frame['frame_id']}: running {model}", flush=True)
-            try:
-                result = annotate_image(image=image, model=model, url=url, keep_alive=keep_alive)
-            except RuntimeError as exc:
+            result = None
+            last_error: RuntimeError | None = None
+            # A repetition loop is a sampling accident, not a property of the image: the model
+            # locks onto one box and repeats it until the token limit truncates the JSON. A
+            # different seed usually breaks the loop, and one retry recovered most failures in
+            # practice. Seeds are fixed and derived, so a rerun still reproduces exactly.
+            for attempt, attempt_seed in enumerate((DEFAULT_SEED, DEFAULT_SEED + 1)):
+                try:
+                    result = annotate_image(
+                        image=image, model=model, url=url,
+                        keep_alive=keep_alive, seed=attempt_seed,
+                    )
+                    if attempt:
+                        print(f"{frame['frame_id']}: {model} recovered on retry", flush=True)
+                    break
+                except RuntimeError as exc:
+                    last_error = exc
+            if result is None:
+                exc = last_error
                 # One model failing one frame must not end the run. Vision models fall into
                 # repetition loops -- emitting the same box until they hit the token limit, which
                 # truncates the JSON mid-object -- and that is a property of the model, not a bug
