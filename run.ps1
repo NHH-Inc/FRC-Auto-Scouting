@@ -281,8 +281,12 @@ function Invoke-Check {
 
         Say 'analysis  -  configure, build and real-video smoke test'
         if (-not (Have 'cmake')) {
-            Bad 'cmake is required for .\run.ps1 check; see docs\RUNNING.md'
-            $failed += 'analysis toolchain'
+            # Skipped, not failed. CI always has cmake, so coverage is not lost -- and the
+            # whole point of CI building the C++ is that nobody NEEDS a local toolchain.
+            # Hard-failing here makes `check` impossible to pass for anyone working only on
+            # the web app or the ingest service, which is the opposite of the intent.
+            Warn 'cmake not installed  -  skipping the C++ build. CI still checks it.'
+            Warn 'To build locally: install CMake + a compiler, see docs\RUNNING.md'
         }
         else {
             $analysisDir = Join-Path $Repo 'analysis'

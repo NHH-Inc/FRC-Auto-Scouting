@@ -16,10 +16,20 @@ from pathlib import Path
 ANALYSIS_ERROR_CODES = {"analysis_failed", "timeout", "internal", "no_match_data"}
 
 
-def resolve_binary_path(binary_path: str) -> str:
-    """Use the Windows ``.exe`` that CMake produces without making Linux config Windows-only."""
+def resolve_binary_path(binary_path: str, os_name: str | None = None) -> str:
+    """Use the Windows ``.exe`` that CMake produces without making Linux config Windows-only.
+
+    ``os_name`` is injectable so this is testable on any platform. Do NOT test this by patching
+    the global ``os.name``: ``os`` is one shared module object, and ``pathlib.Path.__new__``
+    reads ``os.name`` at call time to choose between ``PosixPath`` and ``WindowsPath``. Patching
+    it makes ``Path(...)`` construct a ``WindowsPath`` on Linux, which raises
+    ``NotImplementedError: cannot instantiate 'WindowsPath' on your system`` -- which is exactly
+    how these tests broke CI for five commits.
+    """
+    if os_name is None:
+        os_name = os.name
     path = Path(binary_path)
-    if os.name == "nt" and not path.suffix:
+    if os_name == "nt" and not path.suffix:
         # Ninja/single-config builds use ``bin\\analysis.exe``; Visual Studio multi-config
         # builds use ``bin\\Release\\analysis.exe``. The config stays portable either way.
         candidates = (
@@ -33,8 +43,13 @@ def resolve_binary_path(binary_path: str) -> str:
 
 
 class AnalysisOrchestrator:
-    def __init__(self, binary_path: str, output_base_dir: str = "/data/jobs"):
-        self.binary_path = resolve_binary_path(binary_path)
+    def __init__(
+        self,
+        binary_path: str,
+        output_base_dir: str = "/data/jobs",
+        os_name: str | None = None,
+    ):
+        self.binary_path = resolve_binary_path(binary_path, os_name)
         self.output_base_dir = Path(output_base_dir)
 
     def run_job(self, job_data: dict, season_path: str, on_progress=None) -> dict:

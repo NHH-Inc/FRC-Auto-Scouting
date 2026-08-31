@@ -1,7 +1,14 @@
+"""Windows binary resolution, exercised on every platform.
+
+These deliberately pass ``os_name="nt"`` rather than patching the global ``os.name``.
+Patching it would also change what ``pathlib.Path`` constructs, and a ``WindowsPath``
+cannot be instantiated on Linux -- which is how this file used to fail CI while
+passing locally on Windows.
+"""
+
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from ingest.orchestrator import AnalysisOrchestrator
 
@@ -13,8 +20,7 @@ class AnalysisOrchestratorTests(unittest.TestCase):
             executable = binary.with_suffix(".exe")
             executable.write_bytes(b"test executable")
 
-            with patch("ingest.orchestrator.os.name", "nt"):
-                orchestrator = AnalysisOrchestrator(str(binary))
+            orchestrator = AnalysisOrchestrator(str(binary), os_name="nt")
 
             self.assertEqual(orchestrator.binary_path, str(executable))
 
@@ -22,8 +28,7 @@ class AnalysisOrchestratorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             binary = Path(temp_dir) / "analysis"
 
-            with patch("ingest.orchestrator.os.name", "nt"):
-                orchestrator = AnalysisOrchestrator(str(binary))
+            orchestrator = AnalysisOrchestrator(str(binary), os_name="nt")
 
             self.assertEqual(orchestrator.binary_path, str(binary))
 
@@ -34,7 +39,6 @@ class AnalysisOrchestratorTests(unittest.TestCase):
             executable.parent.mkdir(parents=True)
             executable.write_bytes(b"test executable")
 
-            with patch("ingest.orchestrator.os.name", "nt"):
-                orchestrator = AnalysisOrchestrator(str(binary))
+            orchestrator = AnalysisOrchestrator(str(binary), os_name="nt")
 
             self.assertEqual(orchestrator.binary_path, str(executable))
