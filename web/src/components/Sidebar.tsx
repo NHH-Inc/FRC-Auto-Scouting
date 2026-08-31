@@ -36,7 +36,7 @@ export function Sidebar(props: SidebarProps) {
   return (
     <aside className="sidebar">
       <header className="brand">
-        <h1>FRC Video Scouting</h1>
+        <h1>Project Tengen</h1>
         <span className={`mode ${apiMode}`}>
           {apiMode === 'fixture' ? 'fixture data · no backend' : 'ingest :8080'}
         </span>

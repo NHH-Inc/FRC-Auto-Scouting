@@ -1,4 +1,4 @@
-# FRC Video Scouting — 1. AI and Computer Vision
+# Project Tengen — 1. AI and Computer Vision
 
 One of three context documents. This one covers the analysis backend: models, tracking, event extraction, and training data. Video acquisition is in document 2. The web app, storage, and export are in document 3.
 

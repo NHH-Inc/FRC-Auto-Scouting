@@ -547,7 +547,7 @@ switch ($Command) {
     'native-progress' { Invoke-NativeProgress }
     default {
         Write-Host @'
-FRC Video Scouting
+Project Tengen
 
   .\run.ps1 setup     First-time install. Safe to re-run.
   .\run.ps1 doctor    What is installed and what is missing.

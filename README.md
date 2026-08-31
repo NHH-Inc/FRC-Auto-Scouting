@@ -1,6 +1,10 @@
-# FRC Video Scouting
+# Project Tengen
 
 Watches recorded FRC match video and produces per-robot scouting data.
+
+> "FRC" throughout these docs means the competition — FRC matches, FRC robots, FRC fields.
+> The project itself is Tengen. Environment variables keep their `FRC_` prefix on purpose:
+> renaming them would break every teammate's `.env` for no benefit.
 
 ```
 [3] web  ──HTTP──▶  [2] ingest  ──exec──▶  [1] analysis
