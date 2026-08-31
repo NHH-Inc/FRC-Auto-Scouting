@@ -134,7 +134,7 @@ Sheets, or `ingest\.venv`.
 ## Before anything
 
 ```powershell
-cd "C:\Coding Stuff\Robotics\FRC-Auto-Scouting"
+cd <wherever you cloned Project Tengen>
 git pull
 .\run.ps1 check
 ```

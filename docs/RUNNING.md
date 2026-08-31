@@ -12,8 +12,9 @@ Two PowerShell rules that catch people out:
   *"not recognized as the name of a cmdlet"*. Write `.\ingest\.venv\Scripts\python`.
 - Environment variables are `$env:NAME = 'value'`. There is no `NAME=value command` form.
 
-Throughout, **REPO** means `C:\Coding Stuff\Robotics\FRC-Auto-Scouting` — the folder containing
-`analysis\`, `ingest\`, `web\`.
+Throughout, **REPO** means wherever you cloned Project Tengen — the folder containing
+`analysis\`, `ingest\`, `web\`. It is not the same path on everyone's machine, so substitute
+your own; the commands below use `REPO` rather than pretending otherwise.
 
 ---
 
@@ -77,7 +78,7 @@ Do this once per machine. Three separate steps, each in a **different folder**.
 
 ```bash
 # in: REPO\web
-cd "C:\Coding Stuff\Robotics\FRC-Auto-Scouting\web"
+cd REPO\web
 npm install
 ```
 
@@ -85,7 +86,7 @@ npm install
 
 ```bash
 # in: REPO   <- the ROOT, not web\
-cd "C:\Coding Stuff\Robotics\FRC-Auto-Scouting"
+cd REPO
 python -m venv ingest\.venv
 .\ingest\.venv\Scripts\python -m pip install -r ingest\requirements.txt
 ```
@@ -142,7 +143,7 @@ This needs the ingest service running. **Two terminals.**
 
 ```bash
 # in: REPO
-cd "C:\Coding Stuff\Robotics\FRC-Auto-Scouting"
+cd REPO
 .\ingest\.venv\Scripts\python -m uvicorn ingest.main:app --reload --port 8080
 ```
 
