@@ -1,0 +1,68 @@
+# Proof-of-concept profile, single model.
+#
+# Measured on an RX 7800 XT with all weights resident, using the REAL grammar-constrained prompt
+# (a short benchmark prompt is wildly misleading -- it understated cost by ~16x):
+#
+#     gemma3:4b       17.2s/frame    6 boxes    reliable
+#     qwen3-vl:4b     63.1s/frame    8 boxes    slow
+#     qwen2.5vl:7b    95.1s/frame    FAILS      repetition loop, even with a retry
+#
+# All three on 557 frames projects to ~42 hours, which is not a pipeline anyone will run.
+# gemma3:4b alone does the same 557 frames in ~2.7 hours.
+#
+# The irony is on the record: DECISIONS and the docs flag gemma3 as the model LEAST suited to box
+# grounding, and it is the only one that finishes. That is a statement about this hardware and
+# this prompt, not about which model is most accurate -- with one model there is no agreement
+# signal at all, so `iou_threshold` does nothing here and every box is a single opinion.
+#
+# Use this to get proposals onto every frame as a drawing head start. Use the three-model
+# data_collection.poc.yaml on a subset when you actually want to measure agreement.
+
+# Same contract as data_collection.example.yaml. Two things differ, both because a HUMAN reviews
+# every extracted frame by hand and that is the real budget being spent:
+#
+#   sampling.fps: 0.25 instead of 2.0
+#     At 2 fps a 2.5-minute match yields ~300 frames, and frames half a second apart in FRC
+#     footage are near-duplicates. Ten matches would hand Robert ~3,000 near-identical images to
+#     click through. At 0.25 fps (one frame every 4 seconds) the same ten matches give ~400
+#     frames that actually differ from each other. Diversity ACROSS matches beats density within
+#     one match -- a detector learns more from ten venues than from one venue sampled finely.
+#
+#   split.seed
+#     Distinct from the example profile so a PoC dataset can never be mistaken for a real one.
+#
+# This profile exists because the 2026 data is explicitly disposable: the plan is to clear it and
+# retrain once the competition season starts. Do not use it for the dataset that ships.
+
+season: 2026
+game: REBUILT
+storage:
+  root: data
+  segments: data/segments
+  collections: data/collections
+  datasets: data/datasets
+sampling:
+  fps: 0.25
+  image_format: jpg
+  jpeg_quality: 85
+  include_endpoints: true
+split:
+  seed: 20260830
+  train: 0.70
+  val: 0.15
+  test: 0.15
+classes:
+  - {name: robot, id: 0}
+quality:
+  allow_empty_frames: true
+  exclude_flags: [replay_closeup, camera_cut, unreadable_frame]
+ollama:
+  url: http://127.0.0.1:11434
+  models:
+    - gemma3:4b
+  iou_threshold: 0.40
+  # All three model sets fit in this machine's 16 GB of VRAM at once (~11.9 GB total), so
+  # holding them resident avoids reloading every model for every frame. Measured here: a
+  # load costs ~12s against ~2-3s of actual inference. Leave this at the default "0" on a
+  # machine that cannot hold all three -- it trades speed for memory, nothing else.
+  keep_alive: "15m"
