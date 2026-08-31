@@ -195,11 +195,18 @@ def compare_frame_proposals(
         (best_cluster if best_cluster is not None else clusters.append([candidate]))
         if best_cluster is not None:
             best_cluster.append(candidate)
+    # With a single model there is nothing to agree with, so requiring two supporters would drop
+    # every box and write an empty consensus file -- silently, with no error, which is exactly how
+    # a reviewer ends up staring at blank frames. Pass the boxes through instead, marked honestly
+    # as single-model, and let the caller decide what an unverified proposal is worth.
+    single_model = len({row["model"] for row in proposals}) < 2
+    minimum_support = 1 if single_model else 2
+
     output = []
     for cluster in clusters:
         supporting_models = sorted({item["model"] for item in cluster})
         count = len(supporting_models)
-        if count < 2:
+        if count < minimum_support:
             continue
         # Agreement decides whether a cluster survives. It does NOT average coordinates: a
         # missing or badly localized proposal would drag an averaged box onto empty carpet.
@@ -220,9 +227,14 @@ def compare_frame_proposals(
             "representative_model": representative["model"],
             "supporting_models": supporting_models,
             "agreement_count": count,
-            "agreement_ratio": round(count / len(models), 6),
-            "min_pairwise_iou": round(min(pairwise), 6),
-            "source": "model_ensemble",
+            "agreement_ratio": round(count / len(models), 6) if models else 0.0,
+            # A one-member cluster has no pairs to compare, so there is no agreement to report.
+            # None says that; 0.0 would read as "they disagreed completely", which is a different
+            # and much more damning claim.
+            "min_pairwise_iou": round(min(pairwise), 6) if pairwise else None,
+            # Do not call one model an ensemble. Downstream this is the difference between a
+            # corroborated box and one model's guess.
+            "source": "model_single" if single_model else "model_ensemble",
             "review_status": "unreviewed",
         })
     return sorted(output, key=lambda item: (item["agreement_count"], item["confidence"]), reverse=True)
@@ -255,6 +267,21 @@ def build_consensus(collection: Path, models: list[str], threshold: float) -> Pa
         })
     output = collection / "model-consensus.jsonl"
     _write_jsonl(output, rows)
+
+    # An empty consensus built from non-empty proposals is the failure mode that wastes a whole
+    # review session: export-coco reads this file, so it would hand a reviewer hundreds of frames
+    # with no boxes on them and no indication anything went wrong.
+    proposed_boxes = sum(
+        len(row.get("boxes", [])) for row in proposal_rows if row.get("status") != "failed"
+    )
+    kept_boxes = sum(len(row["boxes"]) for row in rows)
+    if proposed_boxes and not kept_boxes:
+        print(
+            f"WARNING: {proposed_boxes} proposed boxes produced 0 consensus boxes. Every cluster "
+            f"fell below the agreement bar (iou_threshold={threshold}, models={models}). "
+            "export-coco reads this file, so the dataset would have no labels at all.",
+            flush=True,
+        )
     all_boxes = [box for row in rows for box in row["boxes"]]
     per_model = {
         model: {
