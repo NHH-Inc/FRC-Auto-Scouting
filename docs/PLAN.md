@@ -7,7 +7,7 @@ Last updated 2026-08-30.
 Almost all the *software* is done. Almost none of the *data* exists.
 
 ```
-[1] analysis  C++   ████████░░  builds, runs, emits contract-valid output — but has NO trained detector
+[1] analysis  C++   ████████░░  builds and runs locally — but has NO trained detector
 [2] ingest    Py    ██████████  works. Supabase connected, TBA verified, 30 tests + 71 checks green
 [3] web       TS    ██████████  works. Player, overlay, corrections, Sheets export all done
     training  Py    ████████░░  every script is written and tested — nobody has run it on real data

@@ -54,6 +54,54 @@ function Bad([string]$text) { Write-Host "  FAIL  $text" -ForegroundColor Red }
 
 function Have([string]$name) { return [bool](Get-Command $name -ErrorAction SilentlyContinue) }
 
+function Initialize-NativeToolchain {
+    # Find the C++ toolchain without making anyone edit PATH by hand.
+    #
+    # Visual Studio Build Tools ships its own CMake but never puts it on PATH, and vcpkg
+    # downloads a second copy. So `cmake` can be missing from the shell on a machine that has
+    # two working copies of it, which reads as "install CMake" when nothing needs installing.
+    if (-not (Have 'cmake')) {
+        $candidates = @()
+
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+        if (Test-Path $vswhere) {
+            $vsRoot = & $vswhere -latest -products * -property installationPath 2>$null
+            foreach ($root in @($vsRoot)) {
+                if ($root) {
+                    $candidates += (Join-Path $root 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin')
+                }
+            }
+        }
+
+        $candidates += 'C:\Program Files\CMake\bin'
+
+        $vcpkgRoot = if ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { 'C:\vcpkg' }
+        $toolsDir = Join-Path $vcpkgRoot 'downloads\tools'
+        if (Test-Path $toolsDir) {
+            $candidates += (Get-ChildItem $toolsDir -Filter 'cmake-*' -Directory -ErrorAction SilentlyContinue |
+                ForEach-Object { Get-ChildItem $_.FullName -Directory -ErrorAction SilentlyContinue } |
+                ForEach-Object { Join-Path $_.FullName 'bin' })
+        }
+
+        foreach ($dir in $candidates) {
+            if ($dir -and (Test-Path (Join-Path $dir 'cmake.exe'))) {
+                $env:PATH = "$dir;$env:PATH"
+                Ok "found cmake in $dir"
+                break
+            }
+        }
+    }
+
+    # vcpkg lives at the conventional root. Only guess when the user has not chosen one.
+    if (-not $env:VCPKG_ROOT) {
+        $defaultVcpkg = 'C:\vcpkg'
+        if (Test-Path (Join-Path $defaultVcpkg 'vcpkg.exe')) {
+            $env:VCPKG_ROOT = $defaultVcpkg
+            Ok "found vcpkg at $defaultVcpkg"
+        }
+    }
+}
+
 function Require-Venv {
     if (-not (Test-Path $VenvPy)) {
         Bad "No Python venv. Run: .\run.ps1 setup"
@@ -284,6 +332,7 @@ function Invoke-Check {
         }
 
         Say 'analysis  -  configure, build and real-video smoke test'
+        Initialize-NativeToolchain
         if (-not (Have 'cmake')) {
             # Skipped, not failed. CI always has cmake, so coverage is not lost -- and the
             # whole point of CI building the C++ is that nobody NEEDS a local toolchain.

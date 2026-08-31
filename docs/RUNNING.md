@@ -309,17 +309,24 @@ npm run validate:fixtures
 | `pytest` | Downloader, collection and API unit tests |
 | `analysis` | Opens the fixture MP4 with OpenCV, counts its decodable frames, and checks the contract-valid unconfigured-detector output (two match-boundary events and zero invented tracks) |
 
-**The C++ pipeline proof** is part of `run.ps1 check`. On Windows, install Visual Studio Build
-Tools with the **Desktop development with C++** workload, CMake, and OpenCV through vcpkg:
+**The C++ pipeline proof** is part of `run.ps1 check`.
+
+You probably do not have to install CMake. Visual Studio Build Tools ships its own copy and vcpkg
+downloads another, but neither puts it on `PATH` — so `cmake` can be missing from your shell on a
+machine that already has two working copies. `run.ps1 check` now looks in both places (and at
+`C:\vcpkg`) before telling you anything is missing, so on a machine with the C++ workload
+installed it just works with nothing set.
+
+You only need the steps below if `check` reports `cmake not installed`. Install Visual Studio
+Build Tools with the **Desktop development with C++** workload, then set up vcpkg:
 
 ```bash
-# once: install Visual Studio Build Tools with "Desktop development with C++" and CMake tools.
-# Then clone and bootstrap vcpkg (skip the clone if C:\vcpkg already exists).
+# Clone and bootstrap vcpkg (skip the clone if C:\vcpkg already exists).
 git clone https://github.com/microsoft/vcpkg C:\vcpkg
 C:\vcpkg\bootstrap-vcpkg.bat
 
-# in a new Developer PowerShell
-$env:VCPKG_ROOT = 'C:\vcpkg'       # replace with your actual vcpkg folder
+# Only needed if vcpkg is somewhere other than C:\vcpkg -- that path is found automatically.
+$env:VCPKG_ROOT = 'C:\vcpkg'
 
 # in: REPO. First install OpenCV+FFmpeg and ONNX Runtime; use native-progress in a second window.
 .\run.ps1 native-setup
@@ -334,7 +341,7 @@ cmake --build analysis\build --config Release
 OpenCV and ONNX Runtime are linked on a Windows inference machine. The detector stays disabled
 until `FRC_DETECTOR_CONFIG` points to a trained local RF-DETR ONNX file; the reproducible smoke
 test deliberately clears that variable so it always checks plumbing rather than local weights.
-Once `VCPKG_ROOT` is set, `run.ps1 check` automatically uses the same toolchain.
+`run.ps1 check` finds this toolchain on its own and runs the same build.
 
 **Regenerating fixtures.** Deterministic, so a clean regeneration changes nothing and CI fails
 if it does:
