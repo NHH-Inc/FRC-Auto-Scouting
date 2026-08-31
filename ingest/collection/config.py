@@ -56,6 +56,17 @@ class CollectionConfig:
         return float(self.raw.get("ollama", {}).get("iou_threshold", 0.40))
 
     @property
+    def keep_alive(self) -> str:
+        """How long Ollama keeps each model's weights resident between frames.
+
+        Defaults to "0" -- unload immediately -- which is the safe choice on a machine that
+        cannot hold all three model sets at once. Where there is room (roughly 12 GB of VRAM for
+        the default trio), setting something like "10m" avoids reloading a model for every
+        single frame and cuts a run several-fold. It changes speed only, never output.
+        """
+        return str(self.raw.get("ollama", {}).get("keep_alive", "0"))
+
+    @property
     def digest(self) -> str:
         encoded = json.dumps(self.raw, sort_keys=True, separators=(",", ":")).encode()
         return "sha256:" + hashlib.sha256(encoded).hexdigest()

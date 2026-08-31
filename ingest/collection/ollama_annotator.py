@@ -94,7 +94,27 @@ def _validate_boxes(value: dict[str, Any]) -> list[dict[str, Any]]:
     return boxes
 
 
-def annotate_image(*, image: Path, model: str, url: str, timeout: float = 600) -> dict[str, Any]:
+def annotate_image(
+    *,
+    image: Path,
+    model: str,
+    url: str,
+    timeout: float = 600,
+    keep_alive: str = "0",
+) -> dict[str, Any]:
+    """Ask one model for robot boxes on one frame.
+
+    ``keep_alive`` is how long Ollama holds the weights in memory after answering. The default
+    "0" unloads immediately, which is right on a 16 GB Mac where three sets of weights would
+    otherwise compete for memory -- the reason this was hardcoded originally.
+
+    It is badly wrong on a machine with room for all three at once. Unloading after every frame
+    makes each frame pay three model loads, and a load costs far more than the inference does
+    (~12s versus ~2-3s here), so a run takes roughly four times longer than it needs to. Set
+    ``ollama.keep_alive`` in the collection config on such a machine. Model output is unchanged
+    either way: this only controls residency, not sampling, which stays temperature 0 with a
+    fixed seed.
+    """
     request_body = {
         "model": model,
         "messages": [{
@@ -106,7 +126,7 @@ def annotate_image(*, image: Path, model: str, url: str, timeout: float = 600) -
         "think": False,
         "format": BOX_SCHEMA,
         "options": {"temperature": 0, "seed": 20260829},
-        "keep_alive": "0",
+        "keep_alive": keep_alive,
     }
     request = urllib.request.Request(
         url.rstrip("/") + "/api/chat",
@@ -266,7 +286,7 @@ def build_consensus(collection: Path, models: list[str], threshold: float) -> Pa
 
 def annotate_collection(
     *, collection: Path, models: list[str], url: str, threshold: float,
-    limit: int | None = None, force: bool = False,
+    limit: int | None = None, force: bool = False, keep_alive: str = "0",
 ) -> tuple[Path, Path]:
     frame_rows = _read_jsonl(collection / "frames.jsonl")
     if limit is not None:
@@ -288,7 +308,7 @@ def annotate_collection(
             if key in existing:
                 continue
             print(f"{frame['frame_id']}: running {model}", flush=True)
-            result = annotate_image(image=image, model=model, url=url)
+            result = annotate_image(image=image, model=model, url=url, keep_alive=keep_alive)
             rows.append({
                 "frame_id": frame["frame_id"],
                 "model": model,

@@ -75,6 +75,7 @@ def main() -> int:
         proposals, consensus = annotate_collection(
             collection=Path(args.collection), models=models, url=config.ollama_url,
             threshold=config.iou_threshold, limit=args.limit, force=args.force,
+            keep_alive=config.keep_alive,
         )
         print(json.dumps({"proposals": str(proposals), "consensus": str(consensus)}))
         return 0
