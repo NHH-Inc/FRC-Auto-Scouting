@@ -220,3 +220,27 @@ Recorded rather than argued with: it is the team's call, and the alternative was
 tasks unowned, which is worse. Worth revisiting if the critical path stalls. The cheapest
 hedge is ordering: the detection pipeline first, since everything downstream is on fixtures
 until it lands, and Roboflow and the trainer are useless without labels to put in them.
+
+---
+
+**P3 — The 2026 dataset is disposable. It exists to prove the pipeline, not to ship.** `settled`
+
+Every video, frame, proposal, dataset and model produced now gets deleted when the competition
+season starts, and the detector gets retrained from fresh footage.
+
+That single fact changes what "good" means for this round. It is why the proof-of-concept
+collection profile samples at 0.25 fps instead of 2.0, why ten matches was enough to stop at,
+and why `--allow-unreviewed` is acceptable for a first export. None of those would be defensible
+for a dataset meant to last. The thing being tested is whether frames flow end to end into a
+model the C++ analyzer can load — not whether the model is good.
+
+Two things follow that are easy to get wrong:
+
+- **Do not invest in curation now.** Careful label polishing on footage that gets thrown away is
+  wasted effort. Review well enough to prove the loop closes, then stop.
+- **Do not let the disposable dataset become the real one by inertia.** When the season starts,
+  clear `data/` and collect again. A PoC dataset that quietly becomes the shipping dataset is
+  how a project ends up training on 0.25 fps samples of last year's game.
+
+The pipeline, the contracts, the config profiles and the review workflow all survive. Only the
+data goes.

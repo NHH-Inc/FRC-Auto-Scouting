@@ -227,19 +227,26 @@ def build_consensus(collection: Path, models: list[str], threshold: float) -> Pa
     proposal_rows = _read_jsonl(collection / "model-proposals.jsonl")
     by_frame: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in proposal_rows:
-        if row.get("model") in models:
+        # A failed row means "this model gave no answer", which is not the same claim as "this
+        # model saw no robots". Counting it as the latter would let a repetition-loop failure
+        # vote against boxes the other two models agree on.
+        if row.get("model") in models and row.get("status") != "failed":
             by_frame[row["frame_id"]].append(row)
     rows = []
     for frame_id, proposals in sorted(by_frame.items()):
+        answered = [row["model"] for row in proposals]
         rows.append({
             "frame_id": frame_id,
             "annotator_version": OLLAMA_ANNOTATOR_VERSION,
             "models": models,
+            # Which models actually answered for this frame. Where this is shorter than `models`,
+            # agreement counts came from a smaller panel and mean correspondingly less.
+            "responding_models": answered,
             "iou_threshold": threshold,
             "generated_at": _utc_now(),
             "status": "proposed",
             "human_review_required": True,
-            "boxes": compare_frame_proposals(proposals, models, threshold),
+            "boxes": compare_frame_proposals(proposals, answered, threshold),
         })
     output = collection / "model-consensus.jsonl"
     _write_jsonl(output, rows)
@@ -247,6 +254,12 @@ def build_consensus(collection: Path, models: list[str], threshold: float) -> Pa
     per_model = {
         model: {
             "frames_run": sum(row.get("model") == model for row in proposal_rows),
+            # A model that fails often is not contributing a reliable vote, however good its
+            # answers look when it does respond.
+            "frames_failed": sum(
+                row.get("model") == model and row.get("status") == "failed"
+                for row in proposal_rows
+            ),
             "boxes_proposed": sum(
                 len(row.get("boxes", [])) for row in proposal_rows if row.get("model") == model
             ),
@@ -308,7 +321,33 @@ def annotate_collection(
             if key in existing:
                 continue
             print(f"{frame['frame_id']}: running {model}", flush=True)
-            result = annotate_image(image=image, model=model, url=url, keep_alive=keep_alive)
+            try:
+                result = annotate_image(image=image, model=model, url=url, keep_alive=keep_alive)
+            except RuntimeError as exc:
+                # One model failing one frame must not end the run. Vision models fall into
+                # repetition loops -- emitting the same box until they hit the token limit, which
+                # truncates the JSON mid-object -- and that is a property of the model, not a bug
+                # we can fix here. Letting it propagate threw away every frame already labelled in
+                # this collection and every frame after it.
+                #
+                # The ensemble is the reason this is safe: three models vote, so a frame with two
+                # answers is still usable. Record the failure as a row so it stays visible in the
+                # data rather than becoming a silent hole, and carry on.
+                print(f"{frame['frame_id']}: {model} FAILED: {str(exc)[:160]}", flush=True)
+                rows.append({
+                    "frame_id": frame["frame_id"],
+                    "model": model,
+                    "model_digest": installed[model],
+                    "annotator_version": OLLAMA_ANNOTATOR_VERSION,
+                    "generated_at": _utc_now(),
+                    "status": "failed",
+                    "human_review_required": True,
+                    "error": str(exc)[:500],
+                    "boxes": [],
+                })
+                rows.sort(key=lambda row: (row["frame_id"], row["model"]))
+                _write_jsonl(output, rows)
+                continue
             rows.append({
                 "frame_id": frame["frame_id"],
                 "model": model,
