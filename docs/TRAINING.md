@@ -231,10 +231,53 @@ echoing another and adding nothing:
   --collection data\collections\<collection-id>
 ```
 
-### Optional: SAM 3.1 as a second opinion
+### Optional: SAM — and why SAM 2 is not a substitute for SAM 3
 
-Skip this entirely if you want. It's Robert's CUDA machine only, in its own environment —
-**never install SAM into `ingest\.venv`**. One-time setup:
+**Do not start here.** SAM is optional, it is not blocking anything, and the review in step 3 is
+what the project is actually waiting on. Read this only when you have review capacity to spare.
+
+**SAM 2 cannot do what this integration needs.** The `sam3-propose` command works by handing the
+model a *text* prompt — "FRC competition robot" — and getting boxes back. That capability is
+called promptable concept segmentation and **SAM 3 introduced it**. SAM 2 accepts only points,
+boxes, or masks: you have to tell it where the robot already is, which is the entire problem we
+wanted the model to solve. Pointing `sam3-propose` at SAM 2 would leave it with nothing to call.
+
+So if a machine can run SAM 2 but not SAM 3.1, the answer is not "use SAM 2 instead here". It is
+either skip SAM, or build a different thing.
+
+#### The different thing, which is probably worth more
+
+SAM 2's real strength is **video object tracking**: give it an object on one frame and it follows
+that object through the video with a streaming memory. We have video, and our bottleneck is
+per-frame labelling — so the interesting use is not proposals at all:
+
+```text
+draw 6 boxes on ONE frame of a match
+  -> SAM 2 propagates those objects through the clip
+  -> sample the propagated boxes at our extracted-frame timestamps
+  -> a whole match labelled from one frame of human work
+```
+
+That would turn "review 554 frames" into "draw ~10 frames, then verify". Nobody has built it, and
+it is not free:
+
+- **Our frames are 4 seconds apart.** Tracking needs contiguous video, so this runs against the
+  source MP4s in `data\segments\`, not against the extracted frames, and samples at our
+  timestamps afterwards.
+- **Broadcast camera cuts break tracking.** Every cut needs a re-seed. The analyzer already
+  detects shot changes for the `gaps` logic, so there is machinery to align with.
+- **Robots occlude each other constantly**, and identity swap is SAM 2's classic failure — two
+  robots cross, and the tracker comes out following the wrong one.
+- **Video memory grows with clip length.** A 3.5-minute clip at 30 fps is ~6,300 frames; expect to
+  chunk it or subsample.
+
+Two things do get better with SAM 2: it is **Apache 2.0 with no Hugging Face gating** (SAM 3.1
+checkpoints need an approved HF account and a token), and it runs comfortably on a 12 GB card.
+
+#### If you still want SAM 3.1 text proposals
+
+Requires Python 3.12+, PyTorch 2.7+, CUDA 12.6+, and an approved Hugging Face account. Its own
+environment — **never install SAM into `ingest\.venv`**.
 
 ```powershell
 mkdir C:\FRC-SAM3
@@ -248,8 +291,8 @@ git clone https://github.com/facebookresearch/sam3.git
 .\.venv\Scripts\hf auth login
 ```
 
-That last command asks for Robert's own Hugging Face token. It stays on his PC — never in Git,
-Discord, or chat. SAM 3.1 checkpoints need an approved HF account under Meta's licence terms.
+That last command asks for your own Hugging Face token. It stays on your PC — never in Git,
+Discord, or chat.
 
 Then test on ten frames before committing to a full run:
 
@@ -258,7 +301,7 @@ C:\FRC-SAM3\.venv\Scripts\python.exe -m ingest.collection.cli sam3-propose `
   --collection data\collections\<collection-id> --limit 10
 ```
 
-If the boxes are genuinely on robots, rerun without `--limit`. If they're not, drop SAM and move
+If the boxes are genuinely on robots, rerun without `--limit`. If they are not, drop SAM and move
 on — reviewed boxes are the goal, not a tour of foundation models. SAM writes its own
 `sam3-proposals.jsonl` and never overwrites the Ollama consensus, so the comparison stays honest.
 

@@ -171,9 +171,15 @@ the main line.
   frame width, where a few pixels of honest disagreement drops a real match below 0.5.
 - **`jpeg_quality: 85` instead of 95** roughly halves frame storage with no meaningful detection
   loss.
-- **SAM 3.1 as a second proposal source.** Optional, Robert's GPU only. Test on ten frames first
-  and drop it if it doesn't clearly help — reviewed boxes are the goal, not a tour of foundation
-  models.
+- **SAM, if a machine can run it.** Note that this needs SAM **3**, not SAM 2: the integration
+  works by text prompt ("FRC competition robot"), and text prompting is a SAM 3 feature. SAM 2
+  takes only points/boxes/masks, so it cannot stand in.
+- **SAM 2 video tracking — a different, probably better idea.** Draw boxes on one frame, let SAM 2
+  propagate them through the match, sample at our frame timestamps. That converts per-frame
+  labelling into per-match labelling. Nobody has built it; it has to run on the source MP4s rather
+  than the 4-second-spaced frames, and camera cuts and robot-on-robot occlusion both break
+  tracking. Worth doing for the real season dataset, not for a proof of concept that is already
+  labelled. SAM 2 is also Apache 2.0 with no Hugging Face gating, unlike SAM 3.1.
 
 ---
 
