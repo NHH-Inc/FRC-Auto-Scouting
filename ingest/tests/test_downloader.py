@@ -80,6 +80,20 @@ class DownloaderTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.downloader = VideoDownloader(self.temp_dir.name)
 
+        # Neutralise the pre-flight disk guard for these tests.
+        #
+        # capture_live reserves LIVE_RESERVE_HOURS * 4 GB (24 GB by default) before it will start,
+        # which is correct in production and wrong to assert here: it makes the result depend on
+        # how much scratch space the machine happens to have. A GitHub runner has enough some days
+        # and not others, so this suite passed locally and failed in CI on the same commit.
+        #
+        # These tests are about yt-dlp options and output paths. The guard has its own tests in
+        # test_retention.py, where the free-space figure is the thing under test rather than an
+        # accident of the environment.
+        guard = patch("ingest.downloader.require_free_space", lambda *a, **k: None)
+        guard.start()
+        self.addCleanup(guard.stop)
+
     def tearDown(self):
         self.temp_dir.cleanup()
 

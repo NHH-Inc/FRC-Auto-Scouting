@@ -12,6 +12,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
@@ -35,7 +36,17 @@ class DiskGuardTests(unittest.TestCase):
         self.assertIn("free", str(caught.exception).lower())
 
     def test_allows_a_reasonable_request(self):
-        require_free_space(".", need_gb=0.001)
+        # Pin the floor instead of trusting the machine to have MIN_FREE_GB spare. Otherwise this
+        # asserts something about the runner rather than about the function, and fails on a CI box
+        # that happens to be low on scratch space.
+        with patch("ingest.downloader.MIN_FREE_GB", 0.0):
+            require_free_space(".", need_gb=0.001)
+
+    def test_refuses_when_the_floor_is_above_free_space(self):
+        # The floor applies even when the caller asks for almost nothing.
+        with patch("ingest.downloader.MIN_FREE_GB", 10_000_000.0):
+            with self.assertRaises(RuntimeError):
+                require_free_space(".", need_gb=0.001)
 
 
 class _FakeQuery:
