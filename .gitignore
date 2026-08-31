@@ -76,7 +76,7 @@ dist/
 *.tsbuildinfo
 
 # --- editors ---
-# .idea/ is currently tracked from an earlier commit; `git rm -r --cached .idea` to drop it.
+# Untracked in the SCHEMA_VERSION 3 cleanup. JetBrains writes machine-local paths here.
 .idea/
 .vscode/
 

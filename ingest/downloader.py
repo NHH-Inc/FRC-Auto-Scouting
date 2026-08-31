@@ -60,6 +60,47 @@ def start_time_from_url(url: str) -> float:
     return 0.0
 
 
+# Doc 2: "Set a retention policy early or disk usage will get out of hand fast, since a single
+# event's footage is tens of gigabytes." These are the guards that make that concrete.
+#
+# The numbers are deliberately conservative because the team's machines have ~40-107 GB free,
+# and we have already filled 9.2 GB by accident with one unclipped VOD.
+
+#: Refuse to start a download when the disk is below this. A partial file on a full disk is the
+#: worst outcome: it fails anyway AND leaves nothing else room to work.
+MIN_FREE_GB = float(os.environ.get("FRC_MIN_FREE_GB", "10"))
+
+#: Space to reserve before starting a live capture, expressed as hours of footage. This does NOT
+#: truncate the recording -- a live capture must run to the end of the stream, because a
+#: capped file looks complete but is not, and that is worse than failing. It only refuses to
+#: START a capture the disk plainly cannot hold. An FRC event stream is 8-12 hours, and
+#: live_from_start means joining late still pulls everything from the beginning.
+LIVE_RESERVE_HOURS = float(os.environ.get("FRC_LIVE_RESERVE_HOURS", "6"))
+
+
+def free_gb(path: "Path | str") -> float:
+    """Free space on the filesystem holding `path`, in GB."""
+    target = Path(path)
+    while not target.exists() and target != target.parent:
+        target = target.parent
+    return shutil.disk_usage(target).free / (1024 ** 3)
+
+
+def require_free_space(path: "Path | str", need_gb: float = 0.0) -> None:
+    """Raise before writing anything if the disk cannot take it.
+
+    Failing here is much kinder than failing halfway through a 9 GB write, because the disk is
+    still usable afterwards.
+    """
+    available = free_gb(path)
+    required = max(MIN_FREE_GB, need_gb + 1.0)
+    if available < required:
+        raise RuntimeError(
+            f"Only {available:.1f} GB free on {Path(path)}; need at least {required:.1f} GB. "
+            "Free space or delete old segments (see docs/RUNNING.md, retention)."
+        )
+
+
 class VideoDownloader:
     """Downloads browser-playable local MP4 files, one at a time."""
 
@@ -207,6 +248,9 @@ class VideoDownloader:
         del job_id  # Cache by stable video/window tuple, not a transient job id.
         if duration <= 0:
             raise ValueError("Video duration must be greater than zero")
+        # Roughly 4 GB per hour at the 1080p cap, plus headroom for the ffmpeg merge. Refusing
+        # up front beats failing halfway through a 9 GB write and leaving a full disk behind.
+        require_free_space(self.download_dir, need_gb=(duration / 3600.0) * 4.0)
         if start_time < 0:
             raise ValueError("Video start time cannot be negative")
         if not self.has_ffmpeg:
@@ -306,6 +350,10 @@ class VideoDownloader:
         # Do not cache: two captures of the same stream may start at different times.
         output_path = self.download_dir / f"{video_id}_live_{job_id}.mp4"
 
+        # A live capture has no known end. Without a cap, one event stream can fill the disk --
+        # `live_from_start` means joining late still pulls everything from the beginning.
+        require_free_space(self.download_dir, need_gb=LIVE_RESERVE_HOURS * 4.0)
+
         def progress_hook(data: dict):
             if not on_progress:
                 return
@@ -332,6 +380,7 @@ class VideoDownloader:
             "live_from_start": True,
             "merge_output_format": "mp4",
         }
+
         cookies = os.environ.get("YTDLP_COOKIES_FROM_BROWSER")
         if cookies:
             ydl_opts["cookiesfrombrowser"] = (cookies,)

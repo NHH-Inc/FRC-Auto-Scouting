@@ -270,10 +270,14 @@ function Invoke-Check {
             $failed += 'fixture generation'
         }
         else {
-            git diff --quiet -- fixtures
+            # Only the files the generator actually writes. `-- fixtures` would also flag a
+            # hand edit to README.md or tools/, reporting "regenerating changed the fixtures"
+            # for a doc typo -- which sends you hunting for non-determinism that isn't there.
+            $generated = @('fixtures', ':(exclude)fixtures/README.md', ':(exclude)fixtures/tools/*')
+            git diff --quiet -- $generated
             if ($LASTEXITCODE -ne 0) {
                 Bad 'regenerating changed the fixtures'
-                git --no-pager diff --stat -- fixtures
+                git --no-pager diff --stat -- $generated
                 $failed += 'fixture reproducibility'
             }
             else { Ok 'fixtures reproduce byte-for-byte' }
@@ -487,6 +491,7 @@ switch ($Command) {
     'api'    { Invoke-Api }
     'full'   { Invoke-Full }
     'serve'  { Invoke-Serve }
+    'clean'  { Require-Venv; Push-Location $Repo; try { & $VenvPy -m ingest.retention @args } finally { Pop-Location } }
     'doctor' { Invoke-Doctor }
     'db-check' { Invoke-DbCheck }
     'native-setup' { Invoke-NativeSetup }

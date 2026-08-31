@@ -2,14 +2,17 @@
 
 Watches recorded FRC match video and produces per-robot scouting data.
 
-Three components, one repo, no cross-imports. `docs/frc-scouting-0-contract.md` is the only
-shared surface and nothing in `/contracts/` changes without all three people agreeing.
+```
+[3] web  ──HTTP──▶  [2] ingest  ──exec──▶  [1] analysis
+                         │                       │
+                         ├── yt-dlp              └── events.jsonl, tracks.jsonl
+                         ├── TBA API
+                         └── Postgres
+```
 
-    [3] web  ──HTTP──▶  [2] ingest  ──exec──▶  [1] analysis
-                             │                       │
-                             ├── yt-dlp              └── events.jsonl, tracks.jsonl
-                             ├── TBA API
-                             └── Postgres
+Three components, one repo, **no cross-imports**. Component 3 only ever talks to component 2 over
+HTTP; component 2 runs component 1 as a subprocess. `docs/frc-scouting-0-contract.md` is the only
+shared surface, and nothing in `/contracts/` changes without all three of us agreeing.
 
 | Dir | Component | Language | Owns |
 |---|---|---|---|
@@ -18,111 +21,96 @@ shared surface and nothing in `/contracts/` changes without all three people agr
 | `web/` | 3 | TypeScript | UI, player, overlay, corrections, Sheets export |
 | `contracts/` | — | — | Shared schemas + per-year season configs. **Owned by everyone.** |
 | `fixtures/` | — | — | Golden test data. **Owned by everyone.** |
-| `docs/` | — | — | The four context documents |
+| `training/` | — | Python | RF-DETR detector training. Runs on an NVIDIA GPU only. |
+| `docs/` | — | — | Everything below |
 
-**New here?** Read `docs/HANDOFF.md` — it is the whole project in one file.
-**Hosting it, or wondering where videos and data live?** `docs/HOSTING.md`.
-**Just want to run it?** `.
-un.ps1 setup` then `.
-un.ps1 web`. Details in `docs/RUNNING.md`.
+## Which doc do I want?
 
-## Start here
+| I want to… | Read |
+|---|---|
+| **Understand the whole project** | [docs/HANDOFF.md](docs/HANDOFF.md) |
+| **Know what to do next** | [docs/PLAN.md](docs/PLAN.md) |
+| **Just run it** | [docs/RUNNING.md](docs/RUNNING.md) |
+| **Understand or do model training** | [docs/TRAINING.md](docs/TRAINING.md) |
+| **Host it / know where videos and data live** | [docs/HOSTING.md](docs/HOSTING.md) |
+| **Set up the one shared instance** | [docs/CENTRAL-SETUP.md](docs/CENTRAL-SETUP.md) |
+| **Know why something is the way it is** | [docs/DECISIONS.md](docs/DECISIONS.md) |
+| **Write code against the data formats** | [docs/frc-scouting-0-contract.md](docs/frc-scouting-0-contract.md), then [contracts/README.md](contracts/README.md) |
+| **Understand the player / overlay timing rules** | [docs/media-streaming.md](docs/media-streaming.md) |
 
-1. `docs/frc-scouting-0-contract.md` — read before anything else
-2. `contracts/README.md` — the schemas, and what changed when the three contract sets merged
-3. `contracts/OPEN_QUESTIONS.md` — all thirteen v1 questions are resolved in
-   SCHEMA_VERSION 3; this is where the next one gets raised
-4. `fixtures/README.md` — the one worked example every component builds against
-5. `docs/media-streaming.md` — ad-free preview behavior and the media/time contract for models
+## Fastest possible start
 
-## Running component 3 with no backend
+Nothing installed, no backend, no database — the whole UI against the golden fixtures:
 
-    cd web && npm install && npm run dev
+```powershell
+cd web
+npm install
+npm run dev
+```
 
-Serves the whole UI against `/fixtures/`, including a generated 152-second test clip. Ports are
-doc 0 defaults: web `5173`, ingest `8080`, Postgres `5432`.
+Open `http://localhost:5173`. You get a real 152-second clip with real tracks and events. This is
+the right way to work on the web app, and the right way to see what the project does.
 
-## Running the real YouTube-to-local player
+## The real thing
 
-Install ffmpeg once (yt-dlp uses it to merge YouTube's separate video and audio streams):
+```powershell
+.\run.ps1 setup
+.\run.ps1 full
+```
 
-    brew install ffmpeg                 # macOS
-    # sudo apt install ffmpeg           # Debian/Ubuntu
+`run.ps1` is the single entry point. `setup` installs everything; `full` starts ingest and the web
+app together. Ports are the doc 0 defaults — web `5173`, ingest `8080`, Postgres `5432`.
 
-From the repository root, start the ingest API:
+| Command | Does |
+|---|---|
+| `.\run.ps1 setup` | One-time install of every dependency |
+| `.\run.ps1 doctor` | Tells you what is missing and how to fix it |
+| `.\run.ps1 web` | Web app only, fixture data, no backend |
+| `.\run.ps1 api` | Ingest service only |
+| `.\run.ps1 full` | Both, wired together |
+| `.\run.ps1 check` | Every test and contract check |
+| `.\run.ps1 clean` | Reclaim disk from cached segments |
 
-    python3 -m venv .venv
-    .venv/bin/pip install -r ingest/requirements.txt
-    .\ingest\.venv\Scripts\python -m uvicorn ingest.main:app --reload --port 8080
-    # POSIX: ingest/.venv/bin/python -m uvicorn ingest.main:app --reload --port 8080
+Full walkthrough, prerequisites, and troubleshooting: [docs/RUNNING.md](docs/RUNNING.md).
 
-In a second terminal, start the web app in HTTP mode:
+## The rules that keep getting rediscovered
 
-    cd web
-    npm install
-    # put VITE_API_MODE=http in web/.env.local, then:
-    npm run dev
+These are in doc 0, but they are the ones people break:
 
-Open `http://localhost:5173`, paste a YouTube link, and queue it. An ad-free native preview starts
-after metadata resolves while yt-dlp stores the local MP4 under `data/segments/`. The player remains
-usable while analysis runs or if the analysis binary is not built yet. Timestamped links such as
-`&t=2m10s` download only the remaining section and preserve `start_offset`.
-
-The player toolbar can also switch from **Downloaded file** to **Choose matching video…** to review an
-MP4/MOV/WebM already on this computer. Choose **Clipped match segment** when that file starts at
-segment time zero, or **Full original recording** to apply the job's `start_offset`. The file stays
-in the browser; it is not uploaded. Overlay boxes still come from the selected job's
-`tracks.jsonl`, so the recording must be the exact source analyzed for that job. Choosing an
-unrelated video does not generate new detections.
-
-In HTTP mode, newly queued links open in **yt-dlp stream** mode immediately. The ingest service
-resolves separate browser-compatible video and audio files with local `yt-dlp`, proxies their byte
-ranges through `/api/stream/<job-id>/video` and `/audio`, and keeps the two native media elements
-synchronized. This path uses no YouTube iframe, controls, or ad player. The background download
-continues normally; switch to **Downloaded file** after it finishes for an immutable local copy.
-See `docs/media-streaming.md` for endpoint behavior, time/box coordinate invariants, and the rules
-future model integrations must follow.
-
-Optional authenticated videos can use a browser cookie source:
-
-    $env:YTDLP_COOKIES_FROM_BROWSER = 'chrome'
-    .\ingest\.venv\Scripts\python -m uvicorn ingest.main:app --port 8080
-
-Run the focused ingest tests with:
-
-    .\ingest\.venv\Scripts\python -m pytest ingest\tests -q
-
-## Collecting training frames with local vision models
-
-The offline collection workflow extracts hashed frames from a downloaded segment and compares
-robot-box proposals from three local Ollama vision models. See `docs/data-collection.md` for setup,
-commands, output files, and the required human-review boundary.
-
-Ollama connects through `http://127.0.0.1:11434` as configured in
-`configs/data_collection.example.yaml`. Generated frames, manifests, per-model proposals, and
-comparison reports are written to the Git-ignored `data/collections/<collection-id>/` directory.
-They are review inputs, not accepted training labels or analyzer output.
-
-## Checking a component against the contracts
-
-    cd web && npm run validate:fixtures
+- **Corrections never overwrite model output.** `?raw=true` must always return exactly what the
+  model said. A correction composes on read.
+- **`phase` is derived** from `contracts/seasons/<year>.json`. Never hardcode 15/135/20.
+- **Tracks carry a required `gaps` array.** Never interpolate across a gap, and never split a
+  track at one — a gap means "the camera cut away," not "a new robot."
+- **Aggregates are queried, never stored.**
+- **Anything unrecognised is a bug, not a fallback.** Drop the row and report it; do not coerce it.
+- **`goal` is season-scoped** — legal values come from the season config's `goals` array, not from
+  a doc 0 enum.
+- Point values stay zero until the 2026 game is public.
 
 ## Configuration
 
-Component 2 reads these from the environment. All are optional; the service runs without
-them, degrading rather than failing.
+Component 2 reads these from the environment. All are optional — the service degrades rather than
+fails.
 
 | Variable | Effect when unset |
 |---|---|
-| `TBA_API_KEY` | `alliances` and `tba_score` stay null. Component 1 falls back to raw OCR without elimination, and the accuracy comparison has nothing to score against. |
-| `SHEETS_SPREADSHEET_ID` + `GOOGLE_APPLICATION_CREDENTIALS` | `POST /api/export/sheets` returns 503 rather than reporting a write that did not happen. Share the sheet with the service account. |
-| `DATABASE_URL` | SQLite at `./frc_scouting.db`. Set to a Postgres URL in production. |
+| `DATABASE_URL` | SQLite at `./frc_scouting.db`. Set to Postgres in production. |
+| `TBA_API_KEY` | `alliances` and `tba_score` stay null; no scores to check accuracy against. |
+| `SHEETS_SPREADSHEET_ID` + `GOOGLE_APPLICATION_CREDENTIALS` | `POST /api/export/sheets` returns 503 instead of silently not writing. |
 | `FRC_DATA_DIR` | `./data` — segments in `data/segments/`, job output in `data/jobs/`. |
 | `ANALYSIS_BINARY` | `./analysis/build/bin/analysis` |
-| `FRC_DEFAULT_SEASON` | `2026`, used when a job does not name a season. |
+| `FRC_DEFAULT_SEASON` | `2026` |
+| `FRC_MIN_FREE_GB` | `10` — refuses to start a download below this. |
+| `FRC_SEGMENT_GRACE_DAYS` | `7` — how long a completed job's video survives before `clean` reclaims it. |
+
+Never commit `ingest/.env`, `data/`, ONNX weights, service-account JSON, or Hugging Face tokens.
 
 ## Checks
 
-    cd web && npm run typecheck && npm run build && npm run validate:fixtures
-    ingest\.venv\Scripts\python -m ingest.smoke_test     # 71 Contract E checks
-    ingest\.venv\Scripts\python -m pytest ingest/tests -q
+```powershell
+.\run.ps1 check
+```
+
+Which runs: web typecheck + build + fixture validation, 71 Contract E smoke checks, and 30 ingest
+unit tests.

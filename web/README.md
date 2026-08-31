@@ -73,7 +73,7 @@ the view is composed in `src/lib/corrections.ts`. The accuracy panel deliberatel
 
 `contracts/OPEN_QUESTIONS.md` has all thirteen. The ones that shape this code most:
 
-All thirteen original questions were resolved in SCHEMA_VERSION 2, and the v3 `goal` addition is
+All thirteen original questions were resolved in SCHEMA_VERSION 2; the v3 `goal` addition is
 also reflected here. The workarounds are gone: `box_sample_rate`
 arrives on the tracks response, `corrected`/`correction_id` arrive on each event, retry reuses
 the job id, and team attribution is fixed at the track level via

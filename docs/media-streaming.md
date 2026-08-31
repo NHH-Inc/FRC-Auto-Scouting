@@ -92,7 +92,7 @@ or the visible canvas size.
 5. Use the completed local segment for exact replay, audio-event inference, regression tests, and
    comparisons across models. Network stream timing and availability are not reproducible inputs.
 
-See `data-collection.md` for the Ollama commands and generated artifact layout, and
+See `TRAINING.md` for the Ollama commands and generated artifact layout, and
 `frc-scouting-0-contract.md` for the authoritative event and track schemas.
 
 ## Player synchronization

@@ -1,6 +1,6 @@
 # Open contract questions
 
-**All thirteen questions raised against v1 were resolved in SCHEMA_VERSION 2.** The rulings
+**All thirteen questions raised against v1 were resolved in SCHEMA_VERSION 2**, and v3 added `goal`. The rulings
 are in the changelog at the bottom of `docs/frc-scouting-0-contract.md`, which is normative.
 This file is kept as the place to raise the *next* one.
 

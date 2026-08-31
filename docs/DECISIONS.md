@@ -183,7 +183,7 @@ upload enough multi-match data, and have people correct the proposals. The repos
 do that account-owned human step for him.
 
 What is settled: RF-DETR on Robert's 12 GB card, dataset and review on Roboflow, detector and
-team-ID classifier trained separately from different data. `docs/ROBOFLOW.md` is the handoff.
+team-ID classifier trained separately from different data. `docs/TRAINING.md` is the handoff.
 
 **P2 — Component 1 needs real RF-DETR weights, then the analytics layers.** `open`
 The OpenCV pipe proof now opens a real segment, counts decoded frames, and runs an RF-DETR ONNX

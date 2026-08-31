@@ -1,56 +1,18 @@
-# RF-DETR robot detector
+# /training — RF-DETR robot detector
 
-This folder is for Robert's NVIDIA/CUDA machine. Do not run it in `ingest\.venv`, and do not try
-to train on Justin's AMD Windows machine.
+The full explanation and every command lives in **[docs/TRAINING.md](../docs/TRAINING.md)**.
+Start there; this note only covers what is in this folder.
 
-## 1. Produce labels
+| File | What it is |
+|---|---|
+| `run_rfdetr.ps1` | The one command you run. Creates `training\.venv`, installs RF-DETR + CUDA deps, trains, exports ONNX. |
+| `train_rfdetr.py` | What the script calls. Do not run it directly. |
+| `requirements-rfdetr.txt` | Pinned training dependencies. Separate from `ingest\.venv` on purpose. |
 
-Run the existing `extract` and `auto-label` collection commands on a clipped match. Review the
-proposals in Roboflow when its project is available. The collection manifest remains the source
-of truth; images in a training dataset are disposable materializations.
-
-For the explicitly temporary v1 baseline only, turn consensus proposals from **several different
-matches** into RF-DETR's required COCO layout. A match is assigned to one split as a group, so a
-single-match collection cannot provide an honest train/validation dataset:
+Requires an NVIDIA GPU. Not Justin's AMD PC, not a Mac, and never inside `ingest\.venv`.
 
 ```powershell
-.\ingest\.venv\Scripts\python -m ingest.collection.cli export-coco `
-  --collection data\collections\<match-one> data\collections\<match-two> data\collections\<match-three> `
-  --config configs\data_collection.example.yaml `
-  --output data\datasets\robot-v1 `
-  --allow-unreviewed
+.\training\run_rfdetr.ps1 -Dataset data\datasets\robot-v1-reviewed -Output data\models\robot-v1
 ```
 
-Do **not** omit `--allow-unreviewed` unless the label file really has reviewed statuses. Its
-presence makes the temporary quality compromise visible in every training command.
-
-## 2. Train and export
-
-```powershell
-.\training\run_rfdetr.ps1 -Dataset data\datasets\robot-v1 -Output data\models\robot-v1
-```
-
-It uses RF-DETR Small, `640px`, `100` epochs, and `batch-size auto`; RF-DETR picks a safe batch
-for Robert's 12 GB card. It also uses the upstream **conservative** augmentation preset: horizontal
-flips plus mild brightness/contrast variation, alongside RF-DETR's normal resize/scale jitter.
-It deliberately avoids vertical flips, large rotations and extreme perspective changes because
-those do not resemble FRC broadcast footage. The exported file is
-`data\models\robot-v1\onnx\inference_model.onnx`.
-
-The output folder also records the exact choice in `training-config.json`. For an A/B comparison
-against no optional augmentation, add `-Augmentation none` to the command; do not make that the
-default.
-
-## 3. Enable C++ inference
-
-Copy `analysis\config\detector.example.json` to a local file that is not committed, update its
-`model_path` to the exported ONNX file, then set this before running the ingest service:
-
-```powershell
-$env:FRC_DETECTOR_CONFIG = 'analysis\config\detector.local.json'
-.\run.ps1 full
-```
-
-The C++ backend reads RF-DETR's named `dets` and `labels` outputs, retains only class `robot`,
-and emits normalized boxes with explicit gaps at detected broadcast cuts. It does **not** yet do
-bumper OCR, team identification, field homography, or action events.
+Everything it writes under `data\` — datasets, weights, ONNX — stays out of Git.

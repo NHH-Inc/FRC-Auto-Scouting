@@ -1,4 +1,4 @@
-# /fixtures — SCHEMA_VERSION 2
+# /fixtures — SCHEMA_VERSION 3
 
 Doc 0: *"`/fixtures/` contains one fully worked example... This exists so all three people can
 work alone."*

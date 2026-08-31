@@ -88,7 +88,7 @@ def _load_sam3():
         from sam3.model_builder import build_sam3_image_model
     except ImportError as exc:
         raise RuntimeError(
-            "SAM 3.1 is not installed in this Python environment. Follow docs/SAM3.md on "
+            "SAM 3.1 is not installed in this Python environment. Follow docs/TRAINING.md on "
             "Robert's NVIDIA/CUDA machine; do not install it into ingest/.venv."
         ) from exc
     if not torch.cuda.is_available():

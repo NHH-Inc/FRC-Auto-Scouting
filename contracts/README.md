@@ -26,7 +26,7 @@ Validate the fixtures against these schemas with:
 
     cd web && npm run validate:fixtures
 
-## SCHEMA_VERSION 2
+## SCHEMA_VERSION 3
 
 All thirteen questions raised against v1 are resolved; the rulings are in doc 0's changelog.
 Two provisional stances from v1 were overturned, and both would have caused real damage:

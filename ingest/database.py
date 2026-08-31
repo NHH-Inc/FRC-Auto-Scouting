@@ -38,6 +38,37 @@ def init_db():
                 text("ALTER TABLE jobs ADD COLUMN capture_mode VARCHAR DEFAULT 'recorded'")
             )
 
+    # Anything else that drifted gets named out loud. Without this, a model change that nobody
+    # backfills surfaces as `column jobs.<x> does not exist` in the middle of an unrelated
+    # query, which reads like a code bug rather than a schema one. Adding a column above is a
+    # one-line fix once you know which column; finding out is the expensive part.
+    for table, missing in schema_drift().items():
+        print(
+            f"WARNING: table '{table}' is missing column(s) {', '.join(missing)} that the models "
+            "declare. Queries touching them will fail. Add an ALTER TABLE in init_db(), or drop "
+            "the table if it holds nothing you need. See docs/RUNNING.md.",
+            flush=True,
+        )
+
+
+def schema_drift() -> dict[str, list[str]]:
+    """Columns the models declare that the live database does not have.
+
+    ``create_all()`` only creates missing TABLES -- it never adds a column to a table that
+    already exists. Every model change therefore desynchronises every database that predates
+    it, and the shared Postgres is the one that hurts.
+    """
+    inspector = inspect(engine)
+    live_tables = set(inspector.get_table_names())
+    drift: dict[str, list[str]] = {}
+    for table in Base.metadata.sorted_tables:
+        if table.name not in live_tables:
+            continue  # create_all handles a wholly missing table correctly
+        live = {column["name"] for column in inspector.get_columns(table.name)}
+        if missing := sorted({c.name for c in table.columns} - live):
+            drift[table.name] = missing
+    return drift
+
 
 def verify_connection() -> str:
     """Make a cheap real query and return only the database dialect, never its URL."""

@@ -178,67 +178,20 @@ is not ours to decide. Download at home, carry segments in.
 
 ## 7. What is left
 
-### Robert — component 1 is the whole project right now
+The sequenced, owner-assigned plan lives in **[PLAN.md](PLAN.md)** so there is exactly one place
+that says what happens next. The short version:
 
-1. **Create reviewed multi-match robot labels.** Run collection extraction and local consensus,
-   then follow `docs/ROBOFLOW.md`. Keep match-level splits: do not put frames from one match in
-   both train and validation. The `export-coco` command accepts several collections for exactly
-   this reason.
-2. **Train and connect RF-DETR.** On Robert's CUDA machine run
-   `training\run_rfdetr.ps1`, copy `analysis\config\detector.example.json` to the ignored
-   `detector.local.json`, point it at the exported ONNX model, and set
-   `FRC_DETECTOR_CONFIG` before running a real ingest job. Check raw tracks and gaps in the UI.
-3. **Add scoreboard OCR next.** It is independent of bumper OCR and supplies a trustworthy
-   match start. Its crop must be per-video-source config, never hardcoded.
-4. Build from **Contract B in doc 0**, not doc 1's old field list. Emit `gaps` on every track.
-   Read phase boundaries from the season config passed via `--season`.
-5. **You are now on both sides of the Contract D boundary.** Resist making the two sides match
-   each other instead of matching doc 0 — component 3 is written against the contract, and CI
-   checks the binary's output against it independently.
-6. Measure whether `gemma3:4b` is contributing a real vote to the ensemble. It takes image input
-   but is not trained for bounding-box grounding the way the two Qwen-VL models are, and since
-   those two share a family, gemma3 carries all the actual diversity. You already keep per-model
-   raw output, so this is ~20 minutes on 50 frames.
-7. Try `iou_threshold: 0.40` rather than 0.50. A robot in a wide field shot is often under 5% of
-   frame width, where a few pixels of honest disagreement drops a real match below 0.5.
-8. `jpeg_quality: 85` instead of 95 roughly halves your frame storage with no meaningful loss for
-   detection training. You have 40 GB.
+Everything is blocked on one thing — **there is no trained robot detector**, because `data/` is
+empty. No videos, no collections, no reviewed labels, no model. Component 1 finds nothing, so
+component 2 stores nothing, so component 3 shows nothing.
 
-### Robert — also owns everything below, in this order
+The chain is: download 3 matches → extract frames → get model proposals → **a human reviews the
+boxes** → train RF-DETR → point the C++ analyzer at the ONNX. The human review step is the long
+pole and the one no script can do.
 
-9. **Google Sheets export.** Create a Google Cloud service account, download its JSON key,
-   share the spreadsheet with the service account's email as **Editor**, and point
-   `GOOGLE_APPLICATION_CREDENTIALS` at the file. Keep that JSON outside the repo. Everything
-   else is done; the tabs are created automatically. Sheet id is already in `ingest/.env`.
-10. **Ask about the classroom machines.** Cheap to ask, and it is the difference between one
-   training box and twenty labelling boxes.
-11. **Roboflow setup**, which is also the human-review step. The exact account/project/upload
-    procedure is in `docs/ROBOFLOW.md`.
-12. **The detector trainer.** RF-DETR (Apache 2.0 — not Ultralytics, which is AGPL-3.0 and
-    needs a paid licence for closed source), 640px, normal batch size on 12 GB.
-
-**The ordering matters more than usual here**, because it is all one person. Items 1–8 come
-first: the code path is ready, but it cannot produce real tracks until it has model weights.
-Roboflow and the trainer turn existing collections into those weights. Items 9 and 10 are
-ten-minute tasks that can fill a gap.
-
-### Justin
-
-1. Keep running the ingest service and the web app.
-2. Component 3 is done; the next thing it needs is real analysis output to render.
-
-### A note on the split
-
-Robert now owns components 1 and 2, the labelling ensemble, review, training and the export
-credentials. That is nearly the whole project on one person, and it is a single point of
-failure worth naming out loud. See DECISIONS O2.
-
-### Waiting on the world
-
-- **Point values and real goal names** land when the 2026 game is public. Both change together,
-  as one migration.
-
----
+After that works end to end, the next things that matter are scoreboard OCR (trustworthy match
+start), bumper OCR (turns "a robot" into "team 254"), and checking our extracted events against
+real TBA scores. All of that is in [PLAN.md](PLAN.md).
 
 ## 8. Gotchas that cost real time
 
@@ -276,6 +229,6 @@ Verification, all of which CI also runs:
 .\run.ps1 check
 ```
 
-That is 71 Contract E checks against the fixtures, 12 unit tests, 243 fixture records validated
+That is 71 Contract E checks against the fixtures, 30 unit tests, 243 fixture records validated
 against the schemas, a typecheck, a build, and a check that regenerating the fixtures changes
 nothing. If it is green, you have not broken the contract.
