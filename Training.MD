@@ -3,9 +3,9 @@
 This trains the one-class **robot** detector used by the C++ analysis program. It does **not**
 train team-number recognition, shots, reloads, or live scouting.
 
-**Owner:** Robert, on his Windows desktop with the RTX 3060 12 GB NVIDIA GPU.
+**Run this on:** a Windows computer with an NVIDIA CUDA GPU and at least 12 GB of VRAM.
 
-**Do not use:** a Mac, Justin's AMD Windows PC, the shared Supabase database, Google Sheets, or
+**Do not use:** a Mac, an AMD-only Windows PC, the shared Supabase database, Google Sheets, or
 `ingest\.venv` for training.
 
 ---
@@ -82,7 +82,7 @@ none are training labels yet.
 
 ### Option B — optional SAM 3.1 proposals
 
-Only do this after SAM 3.1 is installed in Robert's separate CUDA environment. It writes a
+Only do this after SAM 3.1 is installed in a separate CUDA environment. It writes a
 separate proposal file and does not change the Ollama consensus.
 
 ```powershell
@@ -161,7 +161,7 @@ The reviewed folder is the one to train from. Do not overwrite it with a new unr
 
 ## 6. Train RF-DETR
 
-Run this on Robert's RTX 3060 computer from the repository root:
+Run this on the NVIDIA CUDA computer from the repository root:
 
 ```powershell
 .\training\run_rfdetr.ps1 `
@@ -242,7 +242,7 @@ at broadcast cuts rather than drawing through them.
 
 | Problem | Fix |
 |---|---|
-| `CUDA was not detected` | Run training on Robert's NVIDIA desktop; update the NVIDIA driver if needed. |
+| `CUDA was not detected` | Run training on the NVIDIA CUDA computer; update the NVIDIA driver if needed. |
 | Missing `train/_annotations.coco.json` or `valid/_annotations.coco.json` | Re-export/download the COCO dataset. A single match is not enough. |
 | Roboflow labels look wrong | Fix them in Roboflow, export a new reviewed folder, and train into a new `data\models\...` folder. |
 | No tracks after training | Confirm `FRC_DETECTOR_CONFIG` is set in the same PowerShell window that runs `run.ps1 full`, and verify the ONNX path exists. |
