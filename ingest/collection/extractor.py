@@ -13,6 +13,7 @@ from typing import Any
 
 from . import COLLECTION_SCHEMA_VERSION, EXTRACTOR_VERSION
 from .config import CollectionConfig
+from .frame_quality import filter_frames
 from .provenance import probe_video, sha256_file
 
 
@@ -82,10 +83,24 @@ def extract_collection(
         if not images:
             raise RuntimeError("ffmpeg produced no frames")
         split = _split_for(match_id or f"{video_id}:{start_offset}", config)
+
+        # An FRC broadcast is not all field footage -- it cuts to the FIRST logo, sponsor stings
+        # and "ALLIANCE WINS" cards. ffmpeg samples those as readily as gameplay, and they are
+        # actively harmful as training input: a label model draws "robots" on a logo, and a
+        # detector trained on that learns grey gradients contain robots. Rejected frames stay on
+        # disk with their reason recorded, so the decision is auditable rather than silent.
+        verdicts = {path: verdict for path, verdict in filter_frames(images)}
+
         rows = []
+        rejected = 0
         for number, image in enumerate(images):
             segment_time = number / config.sampling_fps
+            verdict = verdicts[image]
+            if not verdict.keep:
+                rejected += 1
             rows.append({
+                "quality_ok": verdict.keep,
+                "quality_reason": verdict.reason,
                 "frame_id": f"{collection_id}-f{number:06d}",
                 "collection_id": collection_id,
                 "match_id": match_id,
@@ -104,6 +119,9 @@ def extract_collection(
         summary = {
             "collection_id": collection_id,
             "collection_schema_version": COLLECTION_SCHEMA_VERSION,
+            "frames_total": len(images),
+            "frames_quality_ok": len(images) - rejected,
+            "frames_rejected": rejected,
             "season": config.season,
             "game": config.game,
             "match_id": match_id,

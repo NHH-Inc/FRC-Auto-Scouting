@@ -11,3 +11,7 @@ google-api-python-client
 google-auth
 PyYAML
 python-dotenv
+
+# Frame quality filtering: rejects broadcast graphics before they reach a labeller.
+numpy>=2.0
+opencv-python-headless>=4.10

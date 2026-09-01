@@ -21,19 +21,44 @@ const RED = '#e0555f';
 const BLUE = '#4c8cf0';
 const GREY = '#8a8f9c';
 const LOW_CONF = '#e8b93b';
-const OMITTED_START_SECONDS = 5;
-const OMITTED_END_SECONDS = 30;
+// Broadcast padding: the countdown before the match and the score card after it. Trimming these
+// makes review faster, but the amount of padding is a property of whoever cut the upload, not a
+// constant. Fixed values are dangerous here in one specific direction: an FRC match ends with
+// endgame -- the last `endgame_seconds` of play, when robots climb -- so an over-long tail trim
+// silently hides the highest-value part of the match, and nothing in the UI would say so.
+//
+// Defaults are therefore derived, not invented. The trim never exceeds the padding the clip
+// actually has, which is `duration - matchLength` where matchLength comes from the season config.
+const DEFAULT_LEAD_IN_SECONDS = 5;
+const DEFAULT_TAIL_SECONDS = 10;
 
-function getPlaybackWindow(duration: number) {
-  // A short clip cannot have both omissions without leaving no footage to review. Keep it
-  // playable in full rather than creating an invalid or zero-length scrub range.
-  if (duration <= OMITTED_START_SECONDS + OMITTED_END_SECONDS) {
+export interface PlaybackTrim {
+  leadInSeconds?: number;
+  tailSeconds?: number;
+}
+
+function getPlaybackWindow(
+  duration: number,
+  matchLengthSeconds: number,
+  trim?: PlaybackTrim
+) {
+  const requestedLead = trim?.leadInSeconds ?? DEFAULT_LEAD_IN_SECONDS;
+  const requestedTail = trim?.tailSeconds ?? DEFAULT_TAIL_SECONDS;
+
+  // How much of this clip is definitely not match play. If the upload is barely longer than a
+  // match, there is nothing safe to cut and we show all of it.
+  const padding = Math.max(0, duration - matchLengthSeconds);
+  if (padding <= 0) {
     return { start: 0, end: duration };
   }
-  return {
-    start: OMITTED_START_SECONDS,
-    end: duration - OMITTED_END_SECONDS,
-  };
+
+  // Never trim more than the padding, and never let the two ends meet.
+  const lead = Math.max(0, Math.min(requestedLead, padding));
+  const tail = Math.max(0, Math.min(requestedTail, padding - lead));
+  if (duration - lead - tail <= 0) {
+    return { start: 0, end: duration };
+  }
+  return { start: lead, end: duration - tail };
 }
 
 export interface VideoPlayerProps {
@@ -49,6 +74,9 @@ export interface VideoPlayerProps {
   /** Events below this are drawn as suspect. Doc 3: low confidence must be visually distinct. */
   confidenceThreshold: number;
   boxSampleRate: number;
+  /** Broadcast padding to skip. Omitted values fall back to conservative defaults that are
+   *  capped by the clip's real padding, so endgame can never be trimmed away. */
+  trim?: PlaybackTrim;
   selectedEventId: string | null;
   onSelectEvent: (eventId: string | null) => void;
   /** Set by the parent when the user scrubs to an event from elsewhere in the UI. */
@@ -66,6 +94,7 @@ export function VideoPlayer({
   events,
   confidenceThreshold,
   boxSampleRate,
+  trim,
   selectedEventId,
   onSelectEvent,
   seekTo,
@@ -90,7 +119,14 @@ export function VideoPlayer({
   drawState.current = { tracks, events, confidenceThreshold, showBoxes, boxSampleRate };
 
   const duration = job.duration;
-  const playbackWindow = useMemo(() => getPlaybackWindow(duration), [duration]);
+  // 15s auto + 135s teleop + 20s endgame for 2026. Read from the season config so the trim
+  // cannot outlive a rules change.
+  const matchLengthSeconds =
+    season.autoSeconds + season.teleopSeconds + season.endgameSeconds;
+  const playbackWindow = useMemo(
+    () => getPlaybackWindow(duration, matchLengthSeconds, trim),
+    [duration, matchLengthSeconds, trim]
+  );
   const { start: playbackStart, end: playbackEnd } = playbackWindow;
   const PHASE_BOUNDS = phaseBounds(season);
 
