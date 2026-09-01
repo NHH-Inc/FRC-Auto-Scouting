@@ -95,8 +95,48 @@ class MergeTests(unittest.TestCase):
                 src = Path(tmp) / f"src{i}"
                 _make_source(src, "['robot']", {"same_name": ["0 0.5 0.5 0.1 0.2"]})
                 merge_yolo_source(src, ["robot"], out, prefix, MergeStats())
-            files = sorted(p.name for p in (out / "train" / "images").glob("*.jpg"))
+            # Split is hashed per source, so the two may land in different splits. What matters is
+            # that both survive rather than one overwriting the other.
+            files = sorted(p.name for p in out.rglob("*.jpg"))
             self.assertEqual(files, ["s1_same_name.jpg", "s2_same_name.jpg"])
+
+
+class RegroupTests(unittest.TestCase):
+    def test_every_copy_of_a_source_lands_in_one_split(self):
+        # The bug this prevents: Roboflow assigns augmented copies independently, so a flipped
+        # version of a validation image ends up in training and inflates the score.
+        with tempfile.TemporaryDirectory() as tmp:
+            src, out = Path(tmp) / "src", Path(tmp) / "out"
+            copies = {f"shot_jpg.rf.{h*32}": ["0 0.5 0.5 0.1 0.2"] for h in "abcdef"}
+            _make_source(src, "['robot']", copies)
+            merge_yolo_source(src, ["robot"], out, "s1", MergeStats(), copies_per_source=99)
+
+            splits = {p.parent.parent.name for p in out.rglob("*.jpg")}
+            self.assertEqual(len(splits), 1, f"one source spanned {splits}")
+
+    def test_copies_are_reduced_to_one_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, out = Path(tmp) / "src", Path(tmp) / "out"
+            _make_source(src, "['robot']", {
+                f"shot_jpg.rf.{h*32}": ["0 0.5 0.5 0.1 0.2"] for h in "abcdef"
+            })
+            stats = MergeStats()
+            merge_yolo_source(src, ["robot"], out, "s1", stats)
+
+            self.assertEqual(stats.sources_in, 1)
+            self.assertEqual(stats.images_kept, 1, "inherited augmentation should not be kept")
+            self.assertEqual(stats.copies_dropped, 5)
+
+    def test_assignment_is_stable_across_runs(self):
+        from ingest.collection.dataset_merge import assign_split
+        first = [assign_split(f"stem-{i}") for i in range(50)]
+        second = [assign_split(f"stem-{i}") for i in range(50)]
+        self.assertEqual(first, second)
+
+    def test_assignment_spreads_across_all_three_splits(self):
+        from ingest.collection.dataset_merge import assign_split
+        got = {assign_split(f"stem-{i}") for i in range(400)}
+        self.assertEqual(got, {"train", "valid", "test"})
 
     def test_reads_class_names_from_roboflow_data_yaml(self):
         with tempfile.TemporaryDirectory() as tmp:
