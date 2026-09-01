@@ -1,145 +1,139 @@
-# Robert — start here
+# Who does what next
 
-**You do not have to review 554 frames.** This is a proof of concept that gets deleted and
-retrained when the season starts (decision P3 in [DECISIONS.md](DECISIONS.md)), so there is a
-zero-effort path and it is a legitimate choice.
+The job changed. It is no longer "review 554 frames by hand" — that was the plan when the only
+labels we had were one small model's guesses. We now have **2,429 human-labelled FRC robot
+images** from two community datasets, which is a far better starting point than anything we were
+going to produce.
 
-Pick one:
-
-| | Your time | What you get |
-|---|---|---|
-| **A. Train now, review nothing** | **0 min** | Use `robot-poc-v1-autofiltered`. Impossible labels already removed by script. |
-| **B. Spot-check ~50 frames first** | ~25 min | Same dataset, but you'd know whether it is worth showing. |
-| **C. Full review** | hours | The real thing. Save it for the season dataset. |
-
-**Take A unless you want to.** Justin already ran the filtering; the dataset is sitting there.
+**Robert trains. Justin runs the trained model over our footage.** Neither of you reviews frames
+by hand for this round.
 
 ---
 
-## What already happened
+## The handoff, in one line
 
-| Step | Who | Status |
-|---|---|---|
-| 1.1 Download match videos | Justin | done — 10 matches, 10 different events, 2026 REBUILT season |
-| 1.2 Extract frames + model proposals | Justin | done — 554 frames, one vision model |
-| 1.3 Package as COCO | Justin | done — two datasets, see below |
-| 1.4 Review | **optional now** | skip it for the demo |
-| **1.5 Train RF-DETR** | **you** | **← start here** |
-| 1.6 Plug in and look at it | anyone | after 1.5 |
-
-Ten matches from ten different events on purpose: frames from one match must all stay in the same
-train/valid/test split, so each match is one indivisible group. Ten venues means ten lighting
-setups and camera operators, which is what stops the detector memorising one arena.
-
-## The two datasets
-
-Both are on Justin's machine under `data/`, which is git-ignored. Get the folder from him.
-
-| Folder | Frames | Boxes | Use it when |
-|---|---|---|---|
-| `robot-poc-v1-autofiltered` | 447/53/54 | **2,027** | **Default. Train on this.** |
-| `robot-poc-v1` | 447/53/54 | 2,843 | Only if you want the raw, unfiltered proposals |
-
-### What the filter removed, and what it could not
-
-A script (`ingest/collection/sanity_filter.py`) dropped labels that are *impossible*, without
-anybody looking at a frame:
-
-- **71 frames proposed more than 8 boxes.** An FRC field has six robots. A frame claiming nine is
-  wrong about at least three, and there is no way to know which three — so the whole frame stops
-  claiming to be labelled rather than having three boxes deleted at random.
-- **6 boxes covered more than a quarter of the frame.** That is the field or a replay close-up,
-  not one robot.
-
-That is 71% of boxes kept across 483 still-labelled frames.
-
-**The filter cannot catch a box that is simply wrong** — on the wrong object, too loose, or a
-robot missed entirely. Only a human sees that. So everything here is still an unverified guess,
-and the model you train will imitate those guesses, mistakes included.
-
-**For a demo that is fine.** For the season it is not, and nobody should pretend otherwise.
-
-## What the proposals actually are
-
-**One** local vision model (`gemma3:4b`) looked at every frame and guessed. Every box carries
-`agreement_count: 1` and `source: "model_single"` — one model's unverified opinion, with no
-second model agreeing.
-
-Why one model when the design called for three, measured on Justin's GPU with the real prompt:
-
-- `qwen2.5vl:7b` — 95s/frame **and fails constantly** (repetition loop; truncates its own JSON)
-- `qwen3-vl:4b` — 63s/frame, works
-- `gemma3:4b` — 17s/frame, reliable
-
-All three across these frames projects to **42 hours**. One model did it in 77 minutes. The irony
-is on the record: the docs single out `gemma3:4b` as the model *least* suited to box grounding,
-and it is the only one that finishes on a single machine.
-
-If the classroom PCs come through, the real three-model ensemble across twenty machines is about
-two hours — and then model agreement would actually mean something.
-
-## A note on what the demo is really showing
-
-The detector is the least finished part of this project, and it is also not the interesting part.
-What works properly today is the overlay tracking robots frame-accurately, corrections that never
-overwrite raw model output, TBA integration, and the Sheets export.
-
-If the boxes look rough in the demo, **that is a feature you can show**: open a bad box, correct
-it in the UI, and point out that `?raw=true` still returns exactly what the model said. Being able
-to fix the model without destroying its output is a real design decision, not a patch over a
-weakness.
-
-## Then train
-
-On your NVIDIA machine, from the repo root:
-
-```powershell
-.\training\run_rfdetr.ps1 -Dataset data\datasets\robot-poc-v1-autofiltered -Output data\models\robot-poc-v1
+```
+Justin  --[ 163 MB dataset ]-->  Robert  --[ ~20 MB weights ]-->  Justin
 ```
 
-It builds its own environment, installs RF-DETR and CUDA dependencies, trains RF-DETR Small at
-640px, and exports ONNX. Roughly two hours unattended.
+Send the **dataset** one way and the **weights** back. Do not send frames back and forth: the
+dataset is 163 MB, trained weights are about 20 MB, and our 50-match frame set is several GB.
+Moving the model is a hundred times cheaper than moving the images.
 
-Done when `data\models\robot-poc-v1\onnx\inference_model.onnx` exists.
+---
+
+# Justin
+
+## 1. Give Robert exactly one folder
+
+```
+data/datasets/frc-robots-merged/          163 MB
+```
+
+That is the whole handoff. It is git-ignored, so it will not arrive via `git pull` — put it on
+Drive and send the link. Everything else he needs is in the repo.
+
+Inside it:
+
+```
+train/  1,923 images  4,584 boxes
+valid/    237 images    589 boxes
+test/     269 images    642 boxes
+data.yaml            nc: 1   names: ['robot']
+ATTRIBUTION.md       required by CC BY 4.0 -- keep it with the data
+```
+
+Tell him **one class, already YOLO format, ready to train as-is.**
+
+## 2. While he trains
+
+Nothing blocks on you. The 50 matches are downloaded and their frames are extracted with the
+quality filter applied, so they are waiting for his model.
+
+## 3. When his weights arrive
+
+Drop the `.pt` file somewhere local and run it over our frames, then fuse its output with a second
+source using `ingest/collection/box_fusion.py`. That produces the calibrated confidence per box —
+a box three detectors agree on outranks one that a single detector was very sure about.
+
+---
+
+# Robert
+
+## What you are getting
+
+2,429 FRC robot images, **labelled by people**, single `robot` class, already in YOLO format.
+Not our model's guesses — two community datasets from Roboflow Universe, both CC BY 4.0.
+
+## Train
+
+```powershell
+git pull
+# put frc-robots-merged wherever you like, then:
+yolo detect train data=<path>/frc-robots-merged/data.yaml model=yolo11s.pt epochs=100 imgsz=640
+```
+
+Send back `runs/detect/train/weights/best.pt` — about 20 MB. That is all we need from you.
+
+## Two things about this data before you trust a number
+
+**Ignore the source datasets' published accuracy.** WorBots reports mAP@50 of 97.6%. That number
+is inflated: their splits leak. Roboflow augments each photograph into several copies and assigns
+those copies to train/valid/test independently, so a flipped and blurred version of a validation
+image sits in the training set. We measured it — 109 source images in both train and valid for
+dark eden, 94 for WorBots.
+
+We rebuilt the splits so every copy of a photograph lands on one side only. **Your mAP will be
+lower than theirs and that is the point** — it will be a real number rather than a flattering one.
+Do not tune toward 97%.
+
+**These are 2023–2024 seasons, we run on 2026 REBUILT.** Robots look broadly alike across seasons
+— bumpers, similar scale — but field graphics differ. The first thing to check after training is
+whether it holds up on our REBUILT frames, not whether the validation number looks good.
+
+## Do not
+
+- Re-split the dataset. The splits are deliberate; reshuffling reintroduces the leak we removed.
+- Add the game-piece classes back. Notes, speakers, subwoofers and displays were dropped on
+  purpose — a robot detector that has learned "speaker" will label speakers.
+- Commit weights or images. `data/` and `*.pt` stay out of Git.
+
+## Then
+
+Once the boxes look right on real footage, export to ONNX and the C++ analyzer can load it:
+
+```powershell
+yolo export model=runs/detect/train/weights/best.pt format=onnx
+```
 
 Full explanation of what training is and why each rule exists: [TRAINING.md](TRAINING.md).
 
-## Then look at it
+---
 
-```powershell
-Copy-Item analysis\config\detector.example.json analysis\config\detector.local.json
-# point model_path at the ONNX file, then:
-$env:FRC_DETECTOR_CONFIG = (Resolve-Path "analysis\config\detector.local.json").Path
-.\run.ps1 full
-```
+## Why this beats the old plan
 
-Queue a match the model has **never seen**. Judge it by watching the overlay, not by the accuracy
-number: do boxes sit on robots, and do they disappear at camera cuts instead of sliding across
-them? A great mAP with drifting boxes means split leakage, not a good model.
+The previous route was: one small vision model guesses boxes, a human fixes all 554 of them, train
+on the result. We measured what those guesses were worth — a single box size accounted for 23% of
+every box drawn, and the model put "robots" on the FIRST logo. Its ceiling was low and the human
+cost was hours.
 
-The C++ side is already built and verified against real 2026 broadcast footage — it decoded a full
-match (12,864 frames) and correctly emitted zero tracks with no detector configured. So if you see
-no tracks after pointing it at your model, the problem is the config path, not the analyzer.
+Starting from 2,429 real labels skips that entirely. The model you train from them becomes the
+labeller for our own footage, which is the bootstrap the project needed and could not do itself:
+YOLO11 and RF-DETR both ship pretrained on COCO, which has no `robot` class, so neither could
+label FRC robots until something taught one what a robot looks like.
 
-## Never commit
+## Still true
 
-```text
-data\                                 videos, frames, datasets, weights
-analysis\config\detector.local.json
-ingest\.env                           Supabase URL and API keys
-training\.venv\
-Hugging Face tokens, Google service-account JSON
-```
+- Never commit `data/`, `ingest/.env`, weights, service-account JSON, or Hugging Face tokens.
+- Run `.\run.ps1 check` before pushing. CI runs the same thing.
+- Set `git config user.email` on your machine — the last commit landed under Justin's name.
 
-## The other two things you own
+## The two things you also own
 
-Both independent of the review — do them whenever, they are not blocked:
+Neither is blocked by anything above:
 
 - **Google Sheets service account** (3.1 in [PLAN.md](PLAN.md)). Create it in Google Cloud,
-  download the JSON key, share the spreadsheet with the service account's email as **Editor**,
-  point `GOOGLE_APPLICATION_CREDENTIALS` at the file. Keep the JSON outside the repo. Everything
-  else is built — the tabs create themselves and the sheet ID is already in `ingest/.env`.
-- **Ask about the classroom PCs** (3.2). Twenty machines with 5070 Tis. Cheap to ask, and it is
-  the difference between one labelling person and twenty — the review step is browser-only and
-  parallelises perfectly. **Get explicit school permission first, and do not bulk-download
-  YouTube video on school hardware.**
+  download the JSON key, share the sheet with the service account's email as **Editor**, point
+  `GOOGLE_APPLICATION_CREDENTIALS` at the file. Keep the JSON outside the repo.
+- **Ask about the classroom PCs** (3.2). Twenty machines with 5070 Tis. Get explicit school
+  permission, and do not bulk-download YouTube video on school hardware.

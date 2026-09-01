@@ -28,12 +28,24 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-#: Fraction of the frame allowed to sit in one coarse colour bucket. Studio cards are large flat
-#: fills; a real camera shot of a field never is.
-MAX_FLAT_SHARE = 0.30
+#: Fraction of the frame allowed to sit in one coarse colour bucket.
+#:
+#: Recalibrated on 3,300 frames from 25 venues after the first pass, tuned on 10, rejected 94% of
+#: one match. That venue has a large uniform grey floor which pushes gameplay to 0.34-0.39 --
+#: above the old 0.30 cutoff. Real graphics sit at 0.47 (score screens) to 0.69 (FIRST logo), so
+#: the boundary belongs between those populations, not below both.
+MAX_FLAT_SHARE = 0.42
 
-#: Mean HSV value. Graphics cards are lit far brighter than an arena floor.
-MAX_BRIGHTNESS = 150.0
+#: Mean HSV value.
+#:
+#: Also raised, from 150. Brightness is not bimodal across venues: p90 is 161 and p95 is 164, so a
+#: 150 cutoff was rejecting well-lit arenas rather than graphics. Actual title cards land at
+#: 184-192.
+MAX_BRIGHTNESS = 175.0
+
+#: Neither feature separates alone, which is why both rules exist. "RED ALLIANCE WINS" is flat
+#: 0.30 and bright 186; grey-floor gameplay is flat 0.39 and dim 110. Test either threshold on its
+#: own and one of those two is misclassified.
 
 #: Below this the frame is a fade-to-black or a blown cut, with nothing to label either way.
 MIN_BRIGHTNESS = 35.0
