@@ -21,6 +21,20 @@ const RED = '#e0555f';
 const BLUE = '#4c8cf0';
 const GREY = '#8a8f9c';
 const LOW_CONF = '#e8b93b';
+const OMITTED_START_SECONDS = 5;
+const OMITTED_END_SECONDS = 30;
+
+function getPlaybackWindow(duration: number) {
+  // A short clip cannot have both omissions without leaving no footage to review. Keep it
+  // playable in full rather than creating an invalid or zero-length scrub range.
+  if (duration <= OMITTED_START_SECONDS + OMITTED_END_SECONDS) {
+    return { start: 0, end: duration };
+  }
+  return {
+    start: OMITTED_START_SECONDS,
+    end: duration - OMITTED_END_SECONDS,
+  };
+}
 
 export interface VideoPlayerProps {
   job: PlayableJob;
@@ -76,14 +90,16 @@ export function VideoPlayer({
   drawState.current = { tracks, events, confidenceThreshold, showBoxes, boxSampleRate };
 
   const duration = job.duration;
+  const playbackWindow = useMemo(() => getPlaybackWindow(duration), [duration]);
+  const { start: playbackStart, end: playbackEnd } = playbackWindow;
   const PHASE_BOUNDS = phaseBounds(season);
 
   useEffect(() => {
     setReady(false);
     setMediaError(null);
-    setTime(0);
+    setTime(playbackStart);
     setSourceSize(null);
-  }, [src, audioSrc]);
+  }, [audioSrc, playbackStart, src]);
 
   const segmentTime = useCallback(
     (mediaTime: number) => mediaTime - mediaStartSeconds,
@@ -91,8 +107,8 @@ export function VideoPlayer({
   );
 
   const boundedSegmentTime = useCallback(
-    (mediaTime: number) => Math.max(0, Math.min(duration, segmentTime(mediaTime))),
-    [duration, segmentTime]
+    (mediaTime: number) => Math.max(playbackStart, Math.min(playbackEnd, segmentTime(mediaTime))),
+    [playbackEnd, playbackStart, segmentTime]
   );
 
   // ---- drawing
@@ -184,14 +200,18 @@ export function VideoPlayer({
     if (typeof rvfc === 'function') {
       const onFrame = (_now: number, meta: FrameMeta) => {
         if (cancelled) return;
-        const t = segmentTime(meta.mediaTime);
-        setTime(Math.max(0, Math.min(duration, t)));
+        const segment = segmentTime(meta.mediaTime);
+        const t = boundedSegmentTime(meta.mediaTime);
+        setTime(t);
         draw(t);
         const audio = audioRef.current;
         if (audio && !video.paused && Math.abs(audio.currentTime - meta.mediaTime) > 0.12) {
           audio.currentTime = meta.mediaTime;
         }
-        if (t >= duration && !video.paused) video.pause();
+        if (segment >= playbackEnd && !video.paused) {
+          video.pause();
+          audio?.pause();
+        }
         handle = rvfc.call(video, onFrame);
       };
       handle = rvfc.call(video, onFrame);
@@ -203,14 +223,18 @@ export function VideoPlayer({
 
     const tick = () => {
       if (cancelled) return;
-      const t = segmentTime(video.currentTime);
-      setTime(Math.max(0, Math.min(duration, t)));
+      const segment = segmentTime(video.currentTime);
+      const t = boundedSegmentTime(video.currentTime);
+      setTime(t);
       draw(t);
       const audio = audioRef.current;
       if (audio && !video.paused && Math.abs(audio.currentTime - video.currentTime) > 0.12) {
         audio.currentTime = video.currentTime;
       }
-      if (t >= duration && !video.paused) video.pause();
+      if (segment >= playbackEnd && !video.paused) {
+        video.pause();
+        audio?.pause();
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -218,7 +242,7 @@ export function VideoPlayer({
       cancelled = true;
       cancelAnimationFrame(raf);
     };
-  }, [draw, ready, duration, segmentTime]);
+  }, [boundedSegmentTime, draw, playbackEnd, ready, segmentTime]);
 
   // Paused frames still need redrawing when the caller changes filters or the box toggle.
   useEffect(() => {
@@ -245,12 +269,12 @@ export function VideoPlayer({
   const seek = useCallback((t: number) => {
     const video = videoRef.current;
     if (!video) return;
-    const clamped = Math.max(0, Math.min(duration, t));
+    const clamped = Math.max(playbackStart, Math.min(playbackEnd, t));
     video.currentTime = clamped + mediaStartSeconds;
     if (audioRef.current) audioRef.current.currentTime = clamped + mediaStartSeconds;
     setTime(clamped);
     draw(clamped);
-  }, [duration, draw, mediaStartSeconds]);
+  }, [draw, mediaStartSeconds, playbackEnd, playbackStart]);
 
   // Changing between a clipped segment and a full recording does not change the file URL,
   // so metadata will not fire again. Re-anchor playback explicitly when the mode changes.
@@ -264,11 +288,11 @@ export function VideoPlayer({
       return;
     }
     setMediaError(null);
-    video.currentTime = mediaStartSeconds;
-    if (audioRef.current) audioRef.current.currentTime = mediaStartSeconds;
-    setTime(0);
-    draw(0);
-  }, [draw, mediaStartSeconds, ready]);
+    video.currentTime = mediaStartSeconds + playbackStart;
+    if (audioRef.current) audioRef.current.currentTime = mediaStartSeconds + playbackStart;
+    setTime(playbackStart);
+    draw(playbackStart);
+  }, [draw, mediaStartSeconds, playbackStart, ready]);
 
   useEffect(() => {
     if (seekTo) seek(seekTo.t);
@@ -279,7 +303,7 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
-      if (time >= duration) seek(0);
+      if (time < playbackStart || time >= playbackEnd) seek(playbackStart);
       void video.play();
       const audio = audioRef.current;
       if (audio) {
@@ -293,7 +317,7 @@ export function VideoPlayer({
       video.pause();
       audioRef.current?.pause();
     }
-  }, [duration, seek, time]);
+  }, [playbackEnd, playbackStart, seek, time]);
 
   const step = useCallback(
     (frames: number) => {
@@ -413,9 +437,9 @@ export function VideoPlayer({
               );
               return;
             }
-            video.currentTime = mediaStartSeconds;
-            setTime(boundedSegmentTime(video.currentTime));
-            draw(0);
+            video.currentTime = mediaStartSeconds + playbackStart;
+            setTime(playbackStart);
+            draw(playbackStart);
           }}
           onLoadedData={() => {
             setReady(true);
@@ -493,8 +517,8 @@ export function VideoPlayer({
           <input
             className="scrub-input"
             type="range"
-            min={0}
-            max={duration}
+            min={playbackStart}
+            max={playbackEnd}
             step={1 / job.fps}
             value={time}
             onChange={(e) => seek(Number(e.target.value))}

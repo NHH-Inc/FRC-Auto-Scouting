@@ -101,6 +101,11 @@ The visible `<video>` element drives rendering through `requestVideoFrameCallbac
 controls seek, pause, and set playback rate on both native elements. The audio clock is corrected
 when it drifts by more than 120 ms. Overlay lookup always uses the segment time derived above.
 
+For review, the player automatically starts at segment time 5 seconds and stops at 30 seconds
+before the segment end. Clips 35 seconds or shorter play in full so the transport never has an
+empty playback range. The scrubber, frame stepping, event seeks, and the synchronized audio track
+all use the same trimmed window.
+
 If synchronized preview fails, wait for the background download and choose **Downloaded file**.
 That path is also the correct choice for close frame-by-frame annotation.
 
