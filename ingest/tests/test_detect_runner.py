@@ -1,0 +1,138 @@
+"""The detect-and-fuse pipeline, exercised without a trained model present.
+
+Everything except the model call is tested here with stub detectors, so when real weights arrive
+the only untested surface is the ONNX inference itself. Waiting for a model to test the plumbing
+is how you discover a path bug at the worst moment.
+"""
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from ingest.collection.detect_runner import fuse_and_write, run_detectors, usable_frames
+
+
+class StubDetector:
+    """Returns fixed boxes, so fusion behaviour is the thing under test, not a model."""
+
+    def __init__(self, name, boxes):
+        self.name = name
+        self._boxes = boxes
+        self.calls = 0
+
+    def detect(self, image_bgr):
+        self.calls += 1
+        return list(self._boxes)
+
+
+def _collection(root: Path, frames: list[tuple[str, bool]]) -> Path:
+    """Build a collection with (frame_id, quality_ok) pairs and 1px placeholder images."""
+    import cv2
+    import numpy as np
+
+    (root / "frames").mkdir(parents=True)
+    rows = []
+    for fid, ok in frames:
+        img_rel = f"frames/{fid}.jpg"
+        cv2.imwrite(str(root / img_rel), np.full((90, 160, 3), 120, dtype=np.uint8))
+        rows.append({"frame_id": fid, "image_path": img_rel, "quality_ok": ok,
+                     "quality_reason": "ok" if ok else "graphic_card"})
+    (root / "frames.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    return root
+
+
+def box(x, y, c=0.6):
+    return {"x": x, "y": y, "w": 0.10, "h": 0.16, "confidence": c}
+
+
+class UsableFrameTests(unittest.TestCase):
+    def test_rejected_frames_are_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            col = _collection(Path(tmp), [("a", True), ("b", False), ("c", True)])
+            self.assertEqual([f["frame_id"] for f in usable_frames(col)], ["a", "c"])
+
+    def test_collections_without_the_flag_keep_everything(self):
+        # Collections extracted before the quality filter existed have no flag; treating a
+        # missing flag as "rejected" would silently discard every older collection.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "frames").mkdir(parents=True)
+            (root / "frames.jsonl").write_text(
+                json.dumps({"frame_id": "old", "image_path": "frames/old.jpg"}) + "\n",
+                encoding="utf-8")
+            self.assertEqual(len(usable_frames(root)), 1)
+
+
+class RunTests(unittest.TestCase):
+    def test_detector_never_sees_a_rejected_frame(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            col = _collection(Path(tmp), [("a", True), ("b", False), ("c", False)])
+            d = StubDetector("stub", [box(0.3, 0.4)])
+            run_detectors(col, [d])
+            self.assertEqual(d.calls, 1, "a rejected frame was sent to the detector")
+
+    def test_every_detector_runs_on_every_usable_frame(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            col = _collection(Path(tmp), [("a", True), ("b", True)])
+            d1 = StubDetector("yolo", [box(0.3, 0.4)])
+            d2 = StubDetector("rfdetr", [box(0.3, 0.4)])
+            out = run_detectors(col, [d1, d2])
+            self.assertEqual(set(out), {"a", "b"})
+            self.assertEqual(set(out["a"]), {"yolo", "rfdetr"})
+
+
+class FuseWriteTests(unittest.TestCase):
+    def test_agreement_survives_into_the_written_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            col = _collection(Path(tmp), [("a", True)])
+            per_frame = run_detectors(col, [
+                StubDetector("yolo", [box(0.30, 0.40)]),
+                StubDetector("rfdetr", [box(0.31, 0.40)]),
+            ])
+            path = fuse_and_write(col, per_frame)
+            row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+
+            self.assertEqual(row["detectors"], ["rfdetr", "yolo"])
+            self.assertEqual(len(row["boxes"]), 1, "agreeing detectors should collapse to one box")
+            self.assertEqual(row["boxes"][0]["agreement_count"], 2)
+            self.assertTrue(row["human_review_required"])
+
+    def test_a_lone_confident_box_is_ranked_below_a_corroborated_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            col = _collection(Path(tmp), [("a", True)])
+            per_frame = run_detectors(col, [
+                StubDetector("yolo", [box(0.30, 0.40, 0.55), box(0.80, 0.10, 0.99)]),
+                StubDetector("rfdetr", [box(0.30, 0.40, 0.55)]),
+            ])
+            path = fuse_and_write(col, per_frame)
+            boxes = json.loads(path.read_text(encoding="utf-8").splitlines()[0])["boxes"]
+            self.assertEqual(boxes[0]["agreement_count"], 2)
+            self.assertEqual(boxes[-1]["agreement_count"], 1)
+
+    def test_weights_are_estimated_over_the_collection_not_one_frame(self):
+        # A single frame cannot show that a detector habitually invents boxes.
+        with tempfile.TemporaryDirectory() as tmp:
+            col = _collection(Path(tmp), [(f"f{i}", True) for i in range(8)])
+            per_frame = run_detectors(col, [
+                StubDetector("good", [box(0.30, 0.40)]),
+                StubDetector("twin", [box(0.30, 0.40)]),
+                StubDetector("noisy", [box(0.90, 0.90)]),
+            ])
+            path = fuse_and_write(col, per_frame)
+            row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+            weights = row["source_weights"]
+            self.assertLess(weights["noisy"], weights["good"])
+
+    def test_rewriting_replaces_rather_than_appends(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            col = _collection(Path(tmp), [("a", True)])
+            per_frame = run_detectors(col, [StubDetector("yolo", [box(0.3, 0.4)])])
+            fuse_and_write(col, per_frame)
+            path = fuse_and_write(col, per_frame)
+            self.assertEqual(len(path.read_text(encoding="utf-8").strip().splitlines()), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
