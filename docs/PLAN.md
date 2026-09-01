@@ -1,69 +1,62 @@
 # The plan
 
-Last updated 2026-08-31.
+Last updated 2026-09-01.
 
 ## You are here
 
-The software is done and the pipeline has been proven end to end on real footage. What is left is
-the part only a person can do.
+Waiting on one training run. Everything else is built.
 
 ```
-[1] analysis  C++   █████████░  builds locally, verified on real 2026 broadcast - no trained detector
-[2] ingest    Py    ██████████  works. Supabase connected, TBA verified, 30 tests + 71 checks green
-[3] web       TS    ██████████  works. Player, overlay, corrections, Sheets export all done
-    training  Py    ████████░░  scripts written and tested - not yet run on real labels
-    DATA          ███████░░░  10 matches downloaded, 557 frames extracted and proposed
+[1] analysis  C++   █████████░  builds and runs on real broadcast - no trained detector yet
+[2] ingest    Py    ██████████  works. 66 tests, 71 contract checks green
+[3] web       TS    ██████████  player, overlay, corrections, Sheets export
+    labelling Py    ██████████  quality filter, box fusion, detect runner - all tested
+    DATA            █████████░  2,429 labelled images + 3,077 usable frames, no model
 ```
 
-**Steps 1.1 to 1.3 are done.** Justin's part of phase 1 is finished. The dataset is waiting for
-review — see [REVIEW-HANDOFF.md](REVIEW-HANDOFF.md), which is the page Robert should open.
+**Robert has the training data and is training.** When his weights come back, one command labels
+our footage and the loop closes.
 
-What was proven along the way:
+## The plan changed twice, and both times for a reason
 
-- The C++ analyzer decodes a real 2026 broadcast (12,864 frames of `2026tuis_qm29`) and correctly
-  emits **zero tracks** with no detector configured. It invents nothing.
-- The full API path works on real video: job listed, served, correct Contract E envelopes,
-  `box_sample_rate` present, no invented tracks. 8/8 checks.
-- Ten matches from **ten different events** in the 2026 REBUILT season, so every match is an
-  independent split group with its own venue, lighting and camera operator.
+The original route was: one small vision model guesses boxes, a human fixes all 554, train on the
+result. Two things killed it.
 
-## The one thing blocking everything
+**The guesses were not localisation.** A single box size accounted for 23% of every box the model
+drew, and it put "robots" on the FIRST logo. It was stamping a template, not measuring anything,
+so its ceiling was low however much a human corrected afterwards.
 
-**There is no trained robot detector**, and now the only thing standing between us and one is
-step 1.4: a human looking at 557 frames and fixing the boxes.
+**Better data already existed.** Two community datasets on Roboflow Universe, both CC BY 4.0,
+together give **2,429 human-labelled FRC robot images** — more and better than we were going to
+produce, at the cost of a download.
 
-Component 1 finds nothing, so component 2 stores nothing, so component 3 shows nothing. Every
-other task is optional polish until that is done.
+So the shape now is: train on other people's labels, use that model to label our footage, fuse
+several detectors to get a confidence worth trusting. That also breaks the circular problem that
+blocked everything — YOLO11 and RF-DETR both ship pretrained on COCO, which has no `robot` class,
+so neither could label FRC robots until something taught one what a robot is.
 
-## What we learned the hard way: the local VLM ensemble does not scale
+## What exists now
 
-Worth reading before anyone plans around it. Measured on Justin's RX 7800 XT with all weights
-resident in VRAM, using the real grammar-constrained prompt:
+| | |
+|---|---|
+| `data/datasets/frc-robots-merged/` | 2,429 labelled images, one `robot` class, splits rebuilt |
+| `data/collections/` | 3,077 usable frames, 50 matches, 25 venues |
+| `data/segments/` | 4.6 GB source video |
+| `frame_quality.py` | rejects broadcast graphics, recalibrated on 25 venues |
+| `dataset_merge.py` | collapses third-party datasets to one class, fixes their leaks |
+| `box_fusion.py` | confidence recomputed from agreement, weights learned from evidence |
+| `detect_runner.py` | ONNX inference + fusion over a collection |
 
-| model | per frame | boxes | reliability |
-|---|---|---|---|
-| `gemma3:4b` | 17.2s | 6 | fine |
-| `qwen3-vl:4b` | 63.1s | 8 | fine |
-| `qwen2.5vl:7b` | 95.1s | — | **fails constantly** (repetition loop, retry included) |
+## Two things learned that should not be relearned
 
-All three across 557 frames projects to **42 hours**. The proof-of-concept run therefore uses
-`configs/data_collection.poc-fast.yaml` — `gemma3:4b` alone, ~2.7 hours for the same frames.
+**Both source datasets leaked across their own splits.** Roboflow assigns augmented copies of one
+photograph to train/valid/test independently, so a flipped version of a validation image trains
+the model. WorBots' published mAP@50 of 97.6% is inflated by this. We regrouped by source image;
+expect a lower and more honest number.
 
-Three things follow:
-
-1. **The agreement signal is gone.** With one model there is nothing to agree with, so
-   `iou_threshold` does nothing and every box is a single unverified opinion. Treat the proposals
-   as a drawing head start, not as a vote.
-2. **The question in phase 4 is inverted.** The docs asked whether `gemma3:4b` earns its slot as
-   a third vote. On this hardware it is the *only* model that finishes. That says nothing about
-   its accuracy — it is still the model least suited to box grounding — but the ensemble as
-   designed cannot run here.
-3. **A short benchmark lied by 16x.** Timing with "how many robots?" suggested 17s per frame for
-   all three models. The real call generates a multi-box JSON under a schema constraint —
-   hundreds of output tokens, not two. Benchmark the actual call or do not bother.
-
-If the classroom machines come through, running the full ensemble across many machines is exactly
-what they would be good for.
+**Thresholds tuned on ten venues did not survive twenty-five.** The frame filter rejected 94% of
+one match — all of it real gameplay — because that arena has a uniform grey floor. Calibrate on
+the widest sample available, and check the extremes by eye before trusting a filter.
 
 ---
 
@@ -72,65 +65,56 @@ what they would be good for.
 This is the only phase that matters right now. Everything is sequential; each step needs the one
 before it.
 
-### 1.1 — Download matches · **Justin** · DONE
+### 1.1 — Match footage · **Justin** · DONE
 
-Ten qualification matches, one each from **ten different 2026 events** — İstanbul, Canadian
-Pacific, Lake Superior, Northern Lights, Minnesota Bluff Country, Oklahoma, Brazil, Pikes Peak,
-PCH Dalton, FIM Lakeview. About 3.5 minutes each, 1.0 GB total, all real REBUILT footage found
-through TBA's match video listings.
+50 qualification matches from **25 different 2026 events**, 4.6 GB. Two per venue, spaced within
+each event so the pair does not share lighting and field state. One match is one indivisible split
+group, so venue count is what buys generalisation.
 
-One match per event on purpose: a match is an indivisible split group, so ten venues means ten
-independent groups with different lighting, camera operators and field wear.
+### 1.2 — Frames, filtered · **Justin** · DONE
 
-> Disk guards are live. Downloads refuse to start below 10 GB free, and `.\run.ps1 clean`
-> reclaims completed jobs' video after the grace window.
+3,300 frames at 0.25 fps, of which **3,077 are usable**. The rest are FIRST logos, sponsor stings,
+"ALLIANCE WINS" cards and score screens, rejected by `frame_quality.py` before any model sees them.
 
-### 1.2 — Extract frames and get proposals · **Justin** · DONE
+### 1.3 — Training data · **Justin** · DONE
 
-557 frames at 0.25 fps (`configs/data_collection.poc.yaml`), then `gemma3:4b` proposals via
-`configs/data_collection.poc-fast.yaml`.
+Not our own guesses, in the end. Two CC BY 4.0 datasets from Roboflow Universe merged down to a
+single `robot` class: **2,429 human-labelled images**, 5,815 boxes, at
+`data/datasets/frc-robots-merged/`. Their splits leaked and were rebuilt; see the notes above.
 
-The sampling rate is deliberate. At the default 2.0 fps these ten matches would have produced
-several thousand frames half a second apart — near-duplicates that cost review time and teach the
-detector nothing new. 557 frames that actually differ is a better dataset *and* a reviewable one.
-
-Single model rather than the three-model ensemble, for the reasons in the table above. The
-proposals are therefore a **drawing head start, not a vote** — no agreement signal exists.
-
-### 1.3 — Package for review · **Justin** · DONE
-
-`export-coco` across all ten collections with `--allow-unreviewed`, producing
-`data/datasets/robot-poc-v1/` with `train`, `valid` and `test` splits assigned at match
-granularity.
-
-`--allow-unreviewed` is required here and nowhere else: it records in the command itself that
-these labels are model proposals, not ground truth.
-
-### 1.4 — Review the boxes · **Robert** · ⬅ **NEXT. The long pole.**
-
-Roboflow, one class `robot`, per [docs/TRAINING.md](TRAINING.md) step 3. This is the step no
-script can do and the step that sets the ceiling on model quality.
-
-**Done when:** a reviewed COCO folder with non-empty `train` and `valid`.
-
-> If the classroom machines are available, this is the step to parallelise across them — it's
-> browser-only, no GPU needed. Ask first (see 3.2).
-
-### 1.5 — Train · **Robert (NVIDIA GPU)** · ~2 hours unattended
+### 1.4 — Train a labeller · **Robert** · IN PROGRESS
 
 ```powershell
-.\training\run_rfdetr.ps1 -Dataset data\datasets\robot-v1-reviewed -Output data\models\robot-v1
+yolo detect train data=<path>/frc-robots-merged/data.yaml model=yolo11s.pt epochs=100 imgsz=640
+yolo export model=runs/detect/train/weights/best.pt format=onnx
 ```
 
-**Done when:** `data\models\robot-v1\onnx\inference_model.onnx` exists.
+Send back the **ONNX** — about 20 MB. Send the model, never the frames: our frame set is several
+GB and the model is not.
 
-### 1.6 — Plug it in and look at it · **anyone** · ~15 minutes
+**Done when:** a `.onnx` file exists and its boxes land on robots in a match it never saw.
 
-Copy `detector.local.json`, set `FRC_DETECTOR_CONFIG`, run a match the model has **never seen**.
+### 1.5 — Label our footage · **Justin** · ~30 min once weights arrive
 
-**Done when:** boxes sit on robots in the overlay and disappear at camera cuts instead of sliding
-across them. Judge by watching, not by mAP — see the "What good looks like" section in
-[docs/TRAINING.md](TRAINING.md).
+Run the ONNX over the 3,077 usable frames and fuse. `detect_runner.py` does both; the fusion
+recomputes each box's confidence from how much detector weight backs it, how tightly the backers
+agree, and how reliable each detector has proven across the collection.
+
+With one detector there is no agreement signal, so a second source is what makes the confidence
+mean anything. RF-DETR trained on the same merged dataset is the obvious second.
+
+**Done when:** `detector-consensus.jsonl` exists per collection, and the top-ranked boxes are on
+robots rather than on the score bar.
+
+### 1.6 — Plug it into the analyzer and watch · **anyone** · ~15 min
+
+Point `detector.local.json` at the ONNX, set `FRC_DETECTOR_CONFIG`, run a match nothing has seen.
+
+Judge by watching, not by the accuracy number. Do the boxes sit on robots? Do they disappear at
+camera cuts instead of sliding across them? A high mAP with drifting boxes means leakage, not a
+good model — and we already know both source datasets leaked before we rebuilt their splits.
+
+**Done when:** boxes track robots through a real match and gap at broadcast cuts.
 
 **When 1.6 passes, the project works end to end for the first time.** Everything after this is
 improvement rather than construction.
