@@ -48,7 +48,13 @@ class OnnxDetector:
     model_path: str
     name: str = "onnx"
     confidence_threshold: float = 0.25
-    input_size: int = 640
+    #: Read from the model itself when left as None. Getting this wrong silently mis-scales every
+    #: box: an export trained at 960 fed 640-sized input produces plausible, wrong coordinates.
+    input_size: int | None = None
+    #: IoU above which two candidates are treated as the same object. Raw YOLO output contains
+    #: thousands of overlapping candidates per object; without suppression one robot arrives as
+    #: seven boxes and every count downstream is meaningless.
+    nms_iou: float = 0.50
     _session: object = None
 
     def __post_init__(self):
@@ -56,6 +62,10 @@ class OnnxDetector:
         self._session = ort.InferenceSession(
             self.model_path, providers=["CPUExecutionProvider"]
         )
+        if self.input_size is None:
+            # The export records its own training resolution. Trust that over a default.
+            shape = self._session.get_inputs()[0].shape
+            self.input_size = int(shape[2]) if isinstance(shape[2], int) else 640
 
     def detect(self, image_bgr) -> list[dict]:
         import numpy as np
@@ -97,7 +107,28 @@ class OnnxDetector:
                 "h": max(0.0, min(1.0, bh / scale / h0)),
                 "confidence": score,
             })
-        return boxes
+        return non_max_suppression(boxes, self.nms_iou)
+
+
+def non_max_suppression(boxes: list[dict], iou_threshold: float = 0.50) -> list[dict]:
+    """Collapse overlapping candidates to one box per object.
+
+    A raw YOLO tensor holds a prediction for every anchor, so a single robot produces a cluster of
+    near-identical boxes. Without this, counts are inflated several-fold and box fusion sees one
+    detector's repeated opinion as if it were corroboration.
+
+    Greedy and standard: take the most confident box, drop everything overlapping it beyond the
+    threshold, repeat.
+    """
+    from .box_fusion import iou as _iou
+
+    remaining = sorted(boxes, key=lambda b: -b["confidence"])
+    kept: list[dict] = []
+    while remaining:
+        best = remaining.pop(0)
+        kept.append(best)
+        remaining = [b for b in remaining if _iou(best, b) < iou_threshold]
+    return kept
 
 
 def usable_frames(collection: Path) -> list[dict]:

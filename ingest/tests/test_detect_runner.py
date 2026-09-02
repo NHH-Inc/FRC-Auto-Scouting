@@ -10,7 +10,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ingest.collection.detect_runner import fuse_and_write, run_detectors, usable_frames
+from ingest.collection.detect_runner import (
+    fuse_and_write, non_max_suppression, run_detectors, usable_frames)
 
 
 class StubDetector:
@@ -45,6 +46,32 @@ def _collection(root: Path, frames: list[tuple[str, bool]]) -> Path:
 
 def box(x, y, c=0.6):
     return {"x": x, "y": y, "w": 0.10, "h": 0.16, "confidence": c}
+
+
+class NmsTests(unittest.TestCase):
+    """Raw YOLO output repeats each object across many anchors.
+
+    Found the hard way: without suppression one robot arrived as seven boxes at the same spot,
+    a frame reported 21 detections when the field holds six, and box fusion would have read one
+    detector's repeated opinion as corroboration.
+    """
+
+    def test_a_cluster_on_one_object_collapses_to_its_best_box(self):
+        boxes = [box(0.30 + i * 0.001, 0.40, c=0.5 + i * 0.05) for i in range(7)]
+        kept = non_max_suppression(boxes)
+        self.assertEqual(len(kept), 1)
+        self.assertAlmostEqual(kept[0]["confidence"], 0.80, places=6)
+
+    def test_genuinely_separate_objects_all_survive(self):
+        kept = non_max_suppression([box(0.10, 0.10), box(0.50, 0.50), box(0.85, 0.20)])
+        self.assertEqual(len(kept), 3)
+
+    def test_output_is_ordered_by_confidence(self):
+        kept = non_max_suppression([box(0.1, 0.1, 0.3), box(0.5, 0.5, 0.9), box(0.85, 0.2, 0.6)])
+        self.assertEqual([b["confidence"] for b in kept], [0.9, 0.6, 0.3])
+
+    def test_nothing_in_nothing_out(self):
+        self.assertEqual(non_max_suppression([]), [])
 
 
 class UsableFrameTests(unittest.TestCase):
