@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # OpenCV decodes the video and prepares detector inputs. ONNX Runtime is optional for the Linux
 # contract-only CI build; when vcpkg supplies it, the Windows binary includes RF-DETR inference.
-find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio calib3d)
 find_package(onnxruntime CONFIG QUIET)
 
 # vcpkg supplies this on Robert's Windows machine. Keep the FetchContent fallback so the
@@ -30,6 +30,7 @@ add_executable(analysis
     src/IoUTracker.h
     src/RFDetrDetector.cpp
     src/RFDetrDetector.h
+    src/Homography.cpp
 )
 
 target_link_libraries(analysis PRIVATE nlohmann_json::nlohmann_json ${OpenCV_LIBS})

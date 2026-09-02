@@ -26,6 +26,7 @@
 #include <opencv2/videoio.hpp>
 
 #include "ContractModels.h"
+#include "Homography.h"
 #include "IoUTracker.h"
 #include "RFDetrDetector.h"
 
@@ -193,6 +194,10 @@ int main(int argc, char* argv[]) {
         // name a machine-specific model file. With no config, this remains an honest decode-only
         // run with zero tracks -- the old diagnostic box is intentionally gone.
         const frc::vision::DetectorConfig detector_config = frc::vision::load_detector_config();
+        // Optional. Absent or untrustworthy leaves homography_ok false and field
+        // coordinates null, which is the honest output rather than a guessed one.
+        const auto homography = frc::vision::load_homography(
+            season.field_length_ft, season.field_width_ft);
         const frc::vision::RFDetrDetector detector(detector_config);
         const bool detector_enabled = detector.enabled();
 
@@ -265,7 +270,7 @@ int main(int argc, char* argv[]) {
         result.job_id = job.job_id;
         result.model_version = detector_enabled ? detector_config.model_version : "rfdetr-unconfigured";
         result.box_sample_rate = box_sample_rate;
-        result.homography_ok = false;
+        result.homography_ok = homography.has_value();
         result.frames_total = decoded_frames;
         result.frames_analyzed = frames_analyzed;
         result.frames_skipped_shot_change = frames_skipped_shot_change;
