@@ -87,9 +87,17 @@ def hamming(a: int, b: int) -> int:
 
 
 def measure(image_path: Path | str) -> FrameVerdict:
-    """Classify one frame. Reads at reduced size -- full resolution buys nothing here."""
+    """Classify one frame on disk. Reads at reduced size -- full resolution buys nothing here."""
     img = cv2.imread(str(image_path))
     if img is None:
+        return FrameVerdict(False, "unreadable", 0.0, 0.0, 0.0, 0)
+    return measure_image(img)
+
+
+def measure_image(img) -> FrameVerdict:
+    """Classify a frame already in memory, so the dense labelling pass never has to write a JPEG
+    just to ask whether it is a graphic. Same rules and thresholds as the on-disk path."""
+    if img is None or img.size == 0:
         return FrameVerdict(False, "unreadable", 0.0, 0.0, 0.0, 0)
 
     small = cv2.resize(img, (320, 180), interpolation=cv2.INTER_AREA)
