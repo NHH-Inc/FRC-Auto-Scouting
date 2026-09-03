@@ -81,7 +81,17 @@ dist/
 .vscode/
 
 # --- component 2 (ingest) ---
+# Any virtual environment, however it is named. The bare `.venv/` here only matched a directory
+# called exactly that, so `training/.venv-tf-cpu` slipped through and 734 files of site-packages
+# were committed. A venv is machine-specific -- its pyvenv.cfg and scripts hardcode absolute paths
+# to whoever created it -- so a committed one is broken for everybody else and permanent in the
+# history.
 .venv/
+.venv*/
+venv/
+env/
+**/site-packages/
+**/pyvenv.cfg
 __pycache__/
 *.py[cod]
 *.db
