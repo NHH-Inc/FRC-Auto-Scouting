@@ -4,7 +4,7 @@
 # or NVIDIA dependency. The default package name can be overridden with a compatible AMD wheel URL.
 #
 # Example:
-#   ./training/run_tf_amd_rocm.sh --dataset data/datasets/robot-v1-reviewed --output data/models/robot-v1-amd
+#   ./training/run_tf_amd_rocm.sh --dataset data/datasets/frc-robots-v2-coco --output data/models/robot-v1-amd
 #   ./training/run_tf_amd_rocm.sh --tensorflow-package https://repo.radeon.com/.../tensorflow_rocm-...whl ...
 set -euo pipefail
 

@@ -256,6 +256,60 @@ for (const [what, covered] of Object.entries(coverage)) {
   else fail(`no fixture covers: ${what}`);
 }
 
+// Season scouting profiles. Not contract records, but they NAME contract event types, and a
+// profile referencing an event the pipeline never emits yields a silent zero for every team
+// rather than an error. These are the checks JSON Schema cannot express: it cannot compare two
+// properties, sum an array, or know what the events schema allows.
+console.log('\nscouting profiles');
+{
+  const profileSchema = JSON.parse(
+    readFileSync(join(ROOT, 'configs', 'scouting_profile.schema.json'), 'utf8'));
+  const validateProfile = ajv.compile(profileSchema);
+  const legalEventTypes = new Set(
+    JSON.parse(readFileSync(join(CONTRACTS, 'events.schema.json'), 'utf8'))
+      .properties.event_type.enum);
+
+  const profiles = readdirSync(join(ROOT, 'configs'))
+    .filter((f) => f.endsWith('.json') && !f.endsWith('.schema.json'));
+
+  for (const name of profiles) {
+    const doc = readJson(join(ROOT, 'configs', name));
+    checked += 1;
+    if (!validateProfile(doc)) {
+      fail(`${name}: ${ajv.errorsText(validateProfile.errors)}`);
+      continue;
+    }
+    console.log(`  ok   ${name} matches the schema`);
+
+    // Ids must be unique, or two metrics collide into one column downstream.
+    for (const field of ['objective_metrics', 'subjective_ratings']) {
+      const ids = (doc[field] ?? []).map((m) => m.id);
+      if (new Set(ids).size !== ids.length) fail(`${name}: duplicate id in ${field}`);
+    }
+    if (new Set(doc.objective_metrics.map((m) => m.id)).size === doc.objective_metrics.length
+        && new Set(doc.subjective_ratings.map((m) => m.id)).size === doc.subjective_ratings.length) {
+      console.log('  ok   every metric and rating id is unique');
+    }
+
+    // Every event-sourced metric must name an event the contract actually defines.
+    const unknown = doc.objective_metrics
+      .filter((m) => m.source === 'event' && m.event_type && !legalEventTypes.has(m.event_type))
+      .map((m) => `${m.id} -> ${m.event_type}`);
+    if (unknown.length) fail(`${name}: event_type not in the contract: ${unknown.join(', ')}`);
+    else console.log('  ok   every event_type exists in the contract');
+
+    // A rating scale must run upwards.
+    const backwards = doc.subjective_ratings.filter((r) => r.min >= r.max).map((r) => r.id);
+    if (backwards.length) fail(`${name}: min >= max for ${backwards.join(', ')}`);
+    else console.log('  ok   every rating scale runs low to high');
+
+    // Weights are shares of one composite rating, so they must sum to 1.
+    const total = doc.subjective_ratings.reduce((a, r) => a + r.weight, 0);
+    if (Math.abs(total - 1) > 1e-6) fail(`${name}: subjective weights sum to ${total}, not 1.0`);
+    else console.log('  ok   subjective weights sum to 1.0');
+  }
+}
+
 if (failures > 0) {
   console.error(`\n${failures} problem(s) across ${checked} records.`);
   process.exit(1);

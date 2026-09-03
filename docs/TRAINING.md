@@ -332,13 +332,13 @@ Then in Roboflow:
    - **Add** every robot the models missed.
    - **Tighten** each box to one whole robot, bumper included.
    - **Exclude** replay close-ups and camera-cut blur rather than labelling them badly.
-5. Export in **COCO JSON** to a new folder, e.g. `data\datasets\robot-v1-reviewed`.
+5. Export in **COCO JSON** to a new folder, e.g. `data\datasets\frc-robots-v2-coco`.
 
 Verify before moving on:
 
 ```text
-data\datasets\robot-v1-reviewed\train\_annotations.coco.json
-data\datasets\robot-v1-reviewed\valid\_annotations.coco.json
+data\datasets\frc-robots-v2-coco\train\_annotations.coco.json
+data\datasets\frc-robots-v2-coco\valid\_annotations.coco.json
 ```
 
 Never overwrite the reviewed folder with a fresh unreviewed export. That silently throws away
@@ -350,7 +350,7 @@ hours of human work.
 
 Any team member can train a lightweight robot detector on a Ryzen CPU without CUDA, NVIDIA drivers, or an accelerator. It uses the same reviewed COCO dataset:
 
-    .\training\run_tf_cpu.ps1 -Dataset data/datasets/robot-v1-reviewed -Output data/models/robot-v1-tf
+    .\training\run_tf_cpu.ps1 -Dataset data/datasets/frc-robots-v2-coco -Output data/models/robot-v1-tf
 
 Start with `-Resolution 320 -BatchSize 2 -Epochs 10` to check the pipeline, then use a new output directory for a real candidate. `best.keras` is a TensorFlow model, not yet a drop-in replacement for the analyzer's RF-DETR ONNX format.
 
@@ -359,7 +359,7 @@ Start with `-Resolution 320 -BatchSize 2 -Epochs 10` to check the pipeline, then
 For a supported AMD GPU, run the TensorFlow path in Linux or WSL after installing the matching ROCm
 driver. The script verifies that TensorFlow detects the GPU before it trains:
 
-    ./training/run_tf_amd_rocm.sh --dataset data/datasets/robot-v1-reviewed --output data/models/robot-v1-amd
+    ./training/run_tf_amd_rocm.sh --dataset data/datasets/frc-robots-v2-coco --output data/models/robot-v1-amd
 
 If the default `tensorflow-rocm` package does not match your ROCm release, pass AMD's matching wheel
 URL as `--tensorflow-package`. This route contains no CUDA or NVIDIA dependency.
@@ -369,7 +369,7 @@ URL as `--tensorflow-package`. This route contains no CUDA or NVIDIA dependency.
 Linux is not required if the training computer runs Windows with a DirectX 12-compatible AMD GPU.
 Install 64-bit Python 3.10, then run:
 
-    .\training\run_tf_amd_directml.ps1 -Dataset data/datasets/robot-v1-reviewed -Output data/models/robot-v1-amd
+    .\training\run_tf_amd_directml.ps1 -Dataset data/datasets/frc-robots-v2-coco -Output data/models/robot-v1-amd
 
 This uses the TensorFlow DirectML plugin, with no ROCm, CUDA, or NVIDIA dependency. The plugin is
 paused and limited to TensorFlow 2.10, so it is isolated in `training/.venv-tf-amd-directml` and is
@@ -378,7 +378,7 @@ best-effort rather than the default CPU path.
 On the NVIDIA machine, from the repo root:
 
 ```powershell
-.\training\run_rfdetr.ps1 -Dataset data\datasets\robot-v1-reviewed -Output data\models\robot-v1
+.\training\run_rfdetr.ps1 -Dataset data\datasets\frc-robots-v2-coco -Output data\models\robot-v1
 ```
 
 The script creates `training\.venv`, installs RF-DETR and CUDA dependencies, then trains
@@ -392,7 +392,7 @@ footage doesn't exist and training on it wastes capacity on a case that never oc
 Smoke-test the installation first if you like — but never ship a 3-epoch model:
 
 ```powershell
-.\training\run_rfdetr.ps1 -Dataset data\datasets\robot-v1-reviewed -Output data\models\robot-smoke -Epochs 3
+.\training\run_rfdetr.ps1 -Dataset data\datasets\frc-robots-v2-coco -Output data\models\robot-smoke -Epochs 3
 ```
 
 ## Step 5 — Confirm the export
