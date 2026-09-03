@@ -21,23 +21,40 @@ is only for RF-DETR. **For YOLO, use the YOLO archive.**
 ## The command
 
 ```
-yolo detect train data=<path>/frc-robots-v2/data.yaml model=yolo11s.pt epochs=150 imgsz=960 batch=8
+yolo detect train data=<path>/frc-robots-v2/data.yaml model=yolo11n.pt epochs=150 imgsz=960 batch=8
 ```
 
-Drop `batch` to 4 if the 3060 runs out of memory. `imgsz=960` matches what v1 trained at,
-so the numbers are comparable — don't change it without telling us, or the comparison
-against v1 stops meaning anything.
+Drop `batch` to 4 if the 3060 runs out of memory.
 
-Then export:
+**`yolo11n` and `imgsz=960` both matter, and both match v1 exactly.** v1's ONNX takes
+`[1, 3, 960, 960]` and its checkpoint is 5.3 MB, which is yolo11n. Training v2 on a
+bigger model would change the architecture and the data in the same step, and then a
+better score tells us nothing about whether the new data helped — which is the entire
+question this run exists to answer. Keep both the same and the comparison is clean.
+
+If you want a stronger model afterwards, `yolo11s` on this same data is a fine second
+run. Just do it as a second run.
+
+Then export — and the size must be stated, because `yolo export` does not always inherit
+it from training, and a 640 export silently mis-scales every box at inference:
 
 ```
-yolo export model=runs/detect/train/weights/best.pt format=onnx
+yolo export model=runs/detect/train/weights/best.pt format=onnx imgsz=960
 ```
+
+Sanity-check before sending: the exported model's input should read `[1, 3, 960, 960]`
+and its output `[1, 5, N]`. If the input says 640, the export ignored the training size —
+re-export with `imgsz=960`.
 
 ## What to send back
 
-Just `best.onnx`, about 20 MB. Nothing else — no images, no checkpoints, no runs folder.
-Also paste the final metrics line so we can compare against v1.
+**One file: `runs/detect/train/weights/best.onnx`** (~10 MB for yolo11n).
+
+Nothing else — no images, no `.pt` checkpoints, no `runs/` folder. Discord handles 10 MB
+fine; no need for Drive.
+
+Also paste the final metrics line (the `mAP50` / `mAP50-95` row Ultralytics prints at the
+end) so it can be compared against v1.
 
 ## What is actually in this dataset, and why it matters
 
