@@ -1,6 +1,6 @@
 """The official 2026 REBUILT AprilTag positions, and what can honestly be built from them.
 
-The layout in contracts/seasons/2026-apriltags.json is WPILib's published file, copied verbatim.
+The layout in contracts/fields/2026-apriltags.json is WPILib's published file, copied verbatim.
 Nothing in it is estimated here: a fabricated tag coordinate would produce a mapping that is
 confidently wrong everywhere, which is the exact failure the homography work exists to avoid.
 

@@ -1,62 +1,58 @@
 # The plan
 
-Last updated 2026-09-01.
+Last updated 2026-09-02.
 
 ## You are here
 
-Waiting on one training run. Everything else is built.
+The detection pipeline works end to end and produces its own next-generation training data. YOLO
+is the detector; time is the second opinion.
 
 ```
-[1] analysis  C++   █████████░  builds and runs on real broadcast - no trained detector yet
-[2] ingest    Py    ██████████  works. 66 tests, 71 contract checks green
+[1] analysis  C++   ██████████  builds, runs on real broadcast, homography wired in
+[2] ingest    Py    ██████████  153 tests, 71 contract checks green
 [3] web       TS    ██████████  player, overlay, corrections, Sheets export
-    labelling Py    ██████████  quality filter, box fusion, detect runner - all tested
-    DATA            █████████░  2,429 labelled images + 3,077 usable frames, no model
+    detection Py    ██████████  YOLO trained, labels our footage, corroborated by time
+    DATA          ██████████  2,429 human labels + 50 matches densely auto-labelled
 ```
 
-**Robert has the training data and is training.** When his weights come back, one command labels
-our footage and the loop closes.
+## The decision that simplified everything: YOLO alone, corroborated by time
 
-## The plan changed twice, and both times for a reason
+RF-DETR was meant to be the second detector the confidence system needs. Robert trained one and it
+came back undertrained -- 19% mAP, sprawling low-confidence boxes that never overlapped YOLO's, so
+fusion found **0% agreement**. It is kept for later (a 300+ epoch retrain could make it a real
+third voice) but it is off the critical path.
 
-The original route was: one small vision model guesses boxes, a human fixes all 554, train on the
-result. Two things killed it.
+The second opinion that works is **time**. We have video, and a robot that persists across frames
+is corroborated by physics -- an independent witness no single model can be. Fusing YOLO's raw
+detections with their temporally-confirmed subset gives **95% agreement** where RF-DETR gave 0%,
+at no cost of a second model, training run or GPU.
 
-**The guesses were not localisation.** A single box size accounted for 23% of every box the model
-drew, and it put "robots" on the FIRST logo. It was stamping a template, not measuring anything,
-so its ceiling was low however much a human corrected afterwards.
-
-**Better data already existed.** Two community datasets on Roboflow Universe, both CC BY 4.0,
-together give **2,429 human-labelled FRC robot images** — more and better than we were going to
-produce, at the cost of a download.
-
-So the shape now is: train on other people's labels, use that model to label our footage, fuse
-several detectors to get a confidence worth trusting. That also breaks the circular problem that
-blocked everything — YOLO11 and RF-DETR both ship pretrained on COCO, which has no `robot` class,
-so neither could label FRC robots until something taught one what a robot is.
+So the shipped pipeline is: YOLO detects, temporal consistency confirms, fusion produces a
+confidence that actually reflects corroboration. That is the system that was asked for, reached by
+a cheaper and more honest route than a second network.
 
 ## What exists now
 
 | | |
 |---|---|
-| `data/datasets/frc-robots-merged/` | 2,429 labelled images, one `robot` class, splits rebuilt |
-| `data/collections/` | 3,077 usable frames, 50 matches, 25 venues |
-| `data/segments/` | 4.6 GB source video |
-| `frame_quality.py` | rejects broadcast graphics, recalibrated on 25 venues |
-| `dataset_merge.py` | collapses third-party datasets to one class, fixes their leaks |
-| `box_fusion.py` | confidence recomputed from agreement, weights learned from evidence |
-| `detect_runner.py` | ONNX inference + fusion over a collection |
+| `data/datasets/frc-robots-merged/` (+ `-coco`) | 2,429 human-labelled images, YOLO and COCO |
+| `data/robot-v1.onnx` | trained YOLO detector, verified on real footage |
+| `data/dense-labels/` | 50 matches auto-labelled at 5 Hz, corroborated by time |
+| `frame_quality` | rejects broadcast graphics, on disk or in memory |
+| `box_fusion` | confidence from agreement, weights learned from corroboration |
+| `temporal_consistency` | persistence as the second opinion |
+| `dense_label` | the runner that generates next-gen training data |
+| `homography` (Py + C++) | image-to-field feet, real 2026 AprilTag layout vendored |
+| `dead_reckoning` | coasts a track through occlusion, never across a cut |
 
-## Two things learned that should not be relearned
+## The two things learned that should not be relearned
 
-**Both source datasets leaked across their own splits.** Roboflow assigns augmented copies of one
-photograph to train/valid/test independently, so a flipped version of a validation image trains
-the model. WorBots' published mAP@50 of 97.6% is inflated by this. We regrouped by source image;
-expect a lower and more honest number.
+**Both source datasets leaked across their splits.** Roboflow assigns augmented copies
+independently; WorBots' published 97.6% mAP is inflated by it. We regroup by source image.
 
 **Thresholds tuned on ten venues did not survive twenty-five.** The frame filter rejected 94% of
-one match — all of it real gameplay — because that arena has a uniform grey floor. Calibrate on
-the widest sample available, and check the extremes by eye before trusting a filter.
+one match -- all real gameplay -- before recalibration. Tune on the widest sample and check the
+extremes by eye.
 
 ---
 

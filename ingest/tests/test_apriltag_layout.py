@@ -10,7 +10,7 @@ from pathlib import Path
 from ingest.collection.apriltag_layout import (
     METRES_TO_FEET, correspondences_from_observations, load_layout)
 
-LAYOUT = Path("contracts/seasons/2026-apriltags.json")
+LAYOUT = Path("contracts/fields/2026-apriltags.json")
 
 
 class LoadTests(unittest.TestCase):
