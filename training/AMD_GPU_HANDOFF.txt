@@ -1,5 +1,43 @@
-Project Tengen — AMD GPU training handoff (native Windows)
+Project Tengen - AMD GPU training handoff (native Windows)
 ===========================================================
+
+STATUS: BLOCKED. Do not spend time on this route until the blocker below is solved.
+------------------------------------------------------------------------------------
+Tested end to end on an AMD Radeon RX 7800 XT, 2026-09-03. Two of the three stages work:
+
+  Python 3.10.11 + TensorFlow 2.10 + tensorflow-directml-plugin   WORKS
+  DirectML enumerating the GPU                                    WORKS
+    "DirectML device enumeration: found 2 compatible adapters"
+    tf.config.list_physical_devices('GPU') -> two GPUs
+  keras-cv, which supplies the YOLOv8 detector                    IMPOSSIBLE
+
+The last one is not a version to tweak. It is a contradiction:
+
+  tensorflow-directml-plugin  supports TensorFlow 2.10 ONLY
+  every keras-cv release      refuses TensorFlow below 2.11
+  YOLOV8Detector              exists only from keras-cv 0.6.0 onward
+
+Checked, not assumed: keras-cv 0.5.1 raises the same RuntimeError under TF 2.10 as 0.6.4,
+so dropping back to an older keras-cv does not help and would not have YOLOV8Detector
+anyway. There is no combination of these three packages that trains a YOLOv8 on DirectML.
+
+Two ways forward, if local AMD training is still wanted:
+
+  1. torch-directml (recommended). PyTorch's DirectML backend, requires torch 2.4.1 and
+     Python 3.8-3.12, last published Sept 2024 -- eighteen months newer than the
+     TensorFlow plugin. It matters more that this is the SAME stack the rest of the
+     project uses: it would train the same yolo11n, export the same ONNX, and drop
+     straight into the C++ analyzer. The TensorFlow route produces .keras, which nothing
+     in this project can load.
+  2. Write the detector directly in TensorFlow 2.10 without keras-cv. Possible, but it
+     means maintaining a second detector implementation for one machine's GPU.
+
+The DirectML environment itself is left in place and working, because the GPU enumeration
+result is worth keeping: it proves the hardware and driver side is fine, and only the
+model library is the obstacle.
+
+Original instructions below (they run, right up to the keras-cv import)
+======================================================================
 
 Goal
 ----

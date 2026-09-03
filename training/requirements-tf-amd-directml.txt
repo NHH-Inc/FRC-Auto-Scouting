@@ -6,3 +6,9 @@ tensorflow-cpu==2.10.0
 tensorflow-directml-plugin==0.4.0.dev230202
 keras==2.10.0
 keras-cv==0.6.4
+
+# TensorFlow 2.10's C extensions were compiled against the NumPy 1.x ABI, but it only
+# declares numpy>=1.20, so a fresh install pulls NumPy 2.x and dies on import with
+# "Unable to convert function return value to a Python type" from _pywrap_bfloat16.
+# The version that works has to be pinned; the dependency metadata will not do it.
+numpy<2
