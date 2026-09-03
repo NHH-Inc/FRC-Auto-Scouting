@@ -117,3 +117,40 @@ The DirectML plugin is paused by Microsoft and uses TensorFlow 2.10, so this is 
 Windows training route. The generated .keras model is for evaluation and comparison: the current
 C++ analyzer accepts RF-DETR-style ONNX outputs only. Do not place a .keras file in
 analysis/config/detector.local.json.
+
+
+torch-directml was tested too, and is also blocked (2026-09-03)
+==============================================================
+The recommendation above was to try torch-directml instead. It was tried, on the same
+RX 7800 XT. It gets further than the TensorFlow route and is still not usable.
+
+What works:
+
+  torch-directml sees both adapters      [0] Radeon Graphics  [1] RX 7800 XT
+  matmul on the GPU                      ok
+  conv net forward, backward, optimiser  ok -- weights genuinely moved
+  Ultralytics model + dataloader + forward pass on the GPU   ok
+
+So the backend can train a neural network. What it cannot do is run YOLO's loss and
+label assigner. Three separate failures, each only revealed after patching the last:
+
+  1. torch.unique(return_counts=True)    "not implemented for DirectML"
+  2. Tensor.scatter_add_                 "doesn't allow partially modified dimensions"
+  3. tal.py align_metric.mul_().div_()   "result type Float can't be cast to Bool"
+
+The first two are missing operators. A CPU fallback fixes each, and both tensors are
+small enough that the transfer is cheap. The third is different and is why this stops
+here: align_metric arrives as Bool where the code requires Float, which means the
+backend produced a value of the wrong dtype. That is a correctness bug, not a gap. A
+missing operator fails loudly; a wrong dtype can just as easily produce a number that
+looks fine and is wrong, and silently wrong gradients are exactly what this project
+refuses to ship.
+
+Also worth weighing: Ultralytics rejects the device by string ("Invalid CUDA
+device=privateuseone:1") and only accepts a torch.device object, which the trainer then
+stringifies back into its args and re-rejects. Every one of these needs a monkey-patch
+pinned to one Ultralytics version.
+
+Conclusion: train on Robert's NVIDIA card. Local AMD training on Windows is not viable
+for this stack today, by either route. Revisit if torch-directml resumes development --
+its last release was September 2024.
