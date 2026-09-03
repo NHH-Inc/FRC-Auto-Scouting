@@ -346,6 +346,35 @@ hours of human work.
 
 ## Step 4 — Train
 
+### Portable TensorFlow CPU baseline
+
+Any team member can train a lightweight robot detector on a Ryzen CPU without CUDA, NVIDIA drivers, or an accelerator. It uses the same reviewed COCO dataset:
+
+    .\training\run_tf_cpu.ps1 -Dataset data/datasets/robot-v1-reviewed -Output data/models/robot-v1-tf
+
+Start with `-Resolution 320 -BatchSize 2 -Epochs 10` to check the pipeline, then use a new output directory for a real candidate. `best.keras` is a TensorFlow model, not yet a drop-in replacement for the analyzer's RF-DETR ONNX format.
+
+### AMD GPU (ROCm)
+
+For a supported AMD GPU, run the TensorFlow path in Linux or WSL after installing the matching ROCm
+driver. The script verifies that TensorFlow detects the GPU before it trains:
+
+    ./training/run_tf_amd_rocm.sh --dataset data/datasets/robot-v1-reviewed --output data/models/robot-v1-amd
+
+If the default `tensorflow-rocm` package does not match your ROCm release, pass AMD's matching wheel
+URL as `--tensorflow-package`. This route contains no CUDA or NVIDIA dependency.
+
+### AMD GPU on native Windows (DirectML)
+
+Linux is not required if the training computer runs Windows with a DirectX 12-compatible AMD GPU.
+Install 64-bit Python 3.10, then run:
+
+    .\training\run_tf_amd_directml.ps1 -Dataset data/datasets/robot-v1-reviewed -Output data/models/robot-v1-amd
+
+This uses the TensorFlow DirectML plugin, with no ROCm, CUDA, or NVIDIA dependency. The plugin is
+paused and limited to TensorFlow 2.10, so it is isolated in `training/.venv-tf-amd-directml` and is
+best-effort rather than the default CPU path.
+
 On the NVIDIA machine, from the repo root:
 
 ```powershell

@@ -1,0 +1,81 @@
+Project Tengen — AMD GPU training handoff (native Windows)
+===========================================================
+
+Goal
+----
+Train the one-class FRC robot detector on an AMD GPU in Windows. Linux, WSL, ROCm, NVIDIA, and
+CUDA are NOT required. This uses Microsoft's DirectML plugin for TensorFlow.
+
+You need
+--------
+1. Windows 10 (version 1709+) or Windows 11, 64-bit.
+2. A DirectX 12-compatible AMD Radeon GPU with current AMD graphics drivers.
+3. 64-bit Python 3.10. This is important: TensorFlow DirectML does not support newer Python
+   versions for this setup. Install it from https://www.python.org/downloads/release/python-31011/
+   and select "Install launcher for all users".
+4. The reviewed team dataset, e.g. data/datasets/robot-v1-reviewed, containing:
+
+   train/_annotations.coco.json
+   valid/_annotations.coco.json
+
+   It must have exactly one category named "robot".
+
+First run: smoke test
+---------------------
+Open PowerShell in the Project Tengen repository and run:
+
+   .\training\run_tf_amd_directml.ps1 `
+     -Dataset data/datasets/robot-v1-reviewed `
+     -Output data/models/robot-v1-amd-smoke `
+     -Resolution 320 -BatchSize 2 -Epochs 10
+
+The script creates training/.venv-tf-amd-directml. It installs a separate, DirectML-compatible
+TensorFlow environment, then stops if TensorFlow cannot see the GPU. It does not install CUDA,
+ROCm, WSL, Linux, or any NVIDIA software.
+
+If the GPU check fails
+----------------------
+1. Update the AMD Radeon graphics driver and restart Windows.
+2. Confirm the computer has an AMD Radeon GPU in Device Manager.
+3. Confirm Python 3.10 is installed:
+
+   py -3.10 --version
+
+4. Do not substitute newer TensorFlow, Python, or Keras versions: DirectML is tied to the older
+   TensorFlow 2.10 package stack. Send the full error message to the team.
+
+Real training run
+-----------------
+When the smoke test finishes, use a NEW output folder:
+
+   .\training\run_tf_amd_directml.ps1 `
+     -Dataset data/datasets/robot-v1-reviewed `
+     -Output data/models/robot-v1-amd-v1
+
+The defaults are 416-pixel images, batch size 2, and 50 epochs. If Windows reports that the GPU
+runs out of memory, lower the batch size to 1. Never overwrite a previous model output directory.
+
+What to send back
+-----------------
+From data/models/robot-v1-amd-v1, send:
+
+   best.keras
+   final.keras
+   history.csv
+   training-config.json
+
+Also report the AMD GPU model, Windows version, AMD driver version, Python version, and the exact
+training command.
+
+Do not commit or send
+---------------------
+* data/datasets/ or match video unless the team explicitly arranged a transfer.
+* training/.venv-tf-amd-directml/
+* API keys, tokens, or personal account files.
+
+Important limitation
+--------------------
+The DirectML plugin is paused by Microsoft and uses TensorFlow 2.10, so this is a best-effort
+Windows training route. The generated .keras model is for evaluation and comparison: the current
+C++ analyzer accepts RF-DETR-style ONNX outputs only. Do not place a .keras file in
+analysis/config/detector.local.json.
