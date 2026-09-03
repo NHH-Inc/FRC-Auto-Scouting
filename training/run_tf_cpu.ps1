@@ -5,7 +5,7 @@ This script intentionally installs tensorflow-cpu and disables visible GPUs. It 
 neither CUDA nor an NVIDIA GPU, and creates its own environment under training\.venv-tf-cpu.
 
 Example:
-  .\training\run_tf_cpu.ps1 -Dataset data\datasets\robot-v1-reviewed -Output data\models\robot-v1-tf
+  .\training\run_tf_cpu.ps1 -Dataset data\datasets\frc-robots-v2-coco -Output data\models\robot-v1-tf
 #>
 [CmdletBinding()]
 param(
@@ -23,8 +23,26 @@ function Resolve-TrainingPath([string]$Value) {
     if ([System.IO.Path]::IsPathRooted($Value)) { return [System.IO.Path]::GetFullPath($Value) }
     return [System.IO.Path]::GetFullPath((Join-Path $Repo $Value))
 }
+# TensorFlow 2.16 publishes wheels for CPython 3.9 through 3.12 only. A bare `python -m venv`
+# picks whatever is first on PATH, and on a machine with only 3.13 that produces a venv where
+# `pip install tensorflow-cpu` fails with "no matching distribution" -- after the venv already
+# exists, so a rerun silently reuses the broken one. Choose a supported interpreter up front and
+# say so plainly when there is not one.
 if (-not (Test-Path $Python)) {
-    python -m venv (Join-Path $PSScriptRoot '.venv-tf-cpu')
+    $Supported = @('3.12', '3.11', '3.10', '3.9')
+    $Chosen = $null
+    foreach ($v in $Supported) {
+        & py -$v --version *> $null
+        if ($LASTEXITCODE -eq 0) { $Chosen = $v; break }
+    }
+    if (-not $Chosen) {
+        Write-Error ("TensorFlow 2.16 needs Python 3.9-3.12 and none is installed. " +
+            "Found: " + ((& py --list) -join ' ') + ". Install 3.12 from python.org, " +
+            "then rerun. Python 3.13 will NOT work.")
+        exit 1
+    }
+    Write-Host "Creating training\.venv-tf-cpu with Python $Chosen"
+    & py -$Chosen -m venv (Join-Path $PSScriptRoot '.venv-tf-cpu')
 }
 & $Python -m pip install --upgrade pip
 & $Python -m pip install -r (Join-Path $PSScriptRoot 'requirements-tf-cpu.txt')

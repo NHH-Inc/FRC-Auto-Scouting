@@ -13,7 +13,7 @@ You need
 3. 64-bit Python 3.10. This is important: TensorFlow DirectML does not support newer Python
    versions for this setup. Install it from https://www.python.org/downloads/release/python-31011/
    and select "Install launcher for all users".
-4. The reviewed team dataset, e.g. data/datasets/robot-v1-reviewed, containing:
+4. The reviewed team dataset, e.g. data/datasets/frc-robots-v2-coco, containing:
 
    train/_annotations.coco.json
    valid/_annotations.coco.json
@@ -25,7 +25,7 @@ First run: smoke test
 Open PowerShell in the Project Tengen repository and run:
 
    .\training\run_tf_amd_directml.ps1 `
-     -Dataset data/datasets/robot-v1-reviewed `
+     -Dataset data/datasets/frc-robots-v2-coco `
      -Output data/models/robot-v1-amd-smoke `
      -Resolution 320 -BatchSize 2 -Epochs 10
 
@@ -49,7 +49,7 @@ Real training run
 When the smoke test finishes, use a NEW output folder:
 
    .\training\run_tf_amd_directml.ps1 `
-     -Dataset data/datasets/robot-v1-reviewed `
+     -Dataset data/datasets/frc-robots-v2-coco `
      -Output data/models/robot-v1-amd-v1
 
 The defaults are 416-pixel images, batch size 2, and 50 epochs. If Windows reports that the GPU

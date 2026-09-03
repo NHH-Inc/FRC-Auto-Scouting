@@ -4,49 +4,160 @@
   "title": "Season scouting profile (non-contract)",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "season", "objective_metrics", "subjective_ratings", "forecast"],
+  "required": [
+    "version",
+    "season",
+    "objective_metrics",
+    "subjective_ratings",
+    "forecast"
+  ],
   "properties": {
-    "version": { "type": "integer", "const": 1 },
-    "season": { "type": "integer", "minimum": 1992 },
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "season": {
+      "type": "integer",
+      "minimum": 1992
+    },
     "objective_metrics": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "label", "source", "aggregation"],
+        "required": [
+          "id",
+          "label",
+          "source",
+          "aggregation"
+        ],
         "properties": {
-          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
-          "label": { "type": "string", "minLength": 1 },
-          "source": { "type": "string", "enum": ["event", "derived"] },
-          "event_type": { "type": ["string", "null"] },
-          "goal": { "type": ["string", "null"] },
-          "aggregation": { "type": "string", "enum": ["count", "points", "median_seconds", "seconds"] },
-          "description": { "type": "string" }
-        }
-      }
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "event",
+              "derived"
+            ]
+          },
+          "event_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which contract event feeds this metric. Legal values are the event_type enum in contracts/events.schema.json, cross-checked by the validator rather than duplicated here."
+          },
+          "goal": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "aggregation": {
+            "type": "string",
+            "enum": [
+              "count",
+              "points",
+              "median_seconds",
+              "seconds"
+            ]
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "source": {
+                  "const": "event"
+                }
+              },
+              "required": [
+                "source"
+              ]
+            },
+            "then": {
+              "required": [
+                "event_type"
+              ],
+              "properties": {
+                "event_type": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "minItems": 1,
+      "description": "At least one metric. An empty profile validates as JSON but produces no scouting output, which is a configuration mistake rather than a valid choice."
     },
     "subjective_ratings": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "label", "min", "max", "weight"],
+        "required": [
+          "id",
+          "label",
+          "min",
+          "max",
+          "weight"
+        ],
         "properties": {
-          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
-          "label": { "type": "string", "minLength": 1 },
-          "min": { "type": "number" },
-          "max": { "type": "number" },
-          "weight": { "type": "number", "minimum": 0, "maximum": 1 }
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          },
+          "weight": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Share of the composite rating. Weights across all subjective_ratings must sum to 1.0; JSON Schema cannot sum an array, so the validator enforces it."
+          }
         }
-      }
+      },
+      "minItems": 1
     },
     "forecast": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["method", "window_matches"],
+      "required": [
+        "method",
+        "window_matches"
+      ],
       "properties": {
-        "method": { "type": "string", "enum": ["moving_average", "linear_trend"] },
-        "window_matches": { "type": "integer", "minimum": 1 }
+        "method": {
+          "type": "string",
+          "enum": [
+            "moving_average",
+            "linear_trend"
+          ]
+        },
+        "window_matches": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     }
   }

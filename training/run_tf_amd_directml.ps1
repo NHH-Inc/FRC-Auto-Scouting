@@ -27,7 +27,9 @@ if (-not (Test-Path $Python)) {
     if ($LASTEXITCODE -ne 0) { throw 'Could not create a Python 3.10 environment. Install 64-bit Python 3.10.' }
 }
 & $Python -m pip install --upgrade pip
-& $Python -m pip install -r (Join-Path $PSScriptRoot 'requirements-tf-amd-directml.txt')
+# --pre because the DirectML plugin only ever shipped prereleases; without it pip skips them
+# and reports the package as unavailable rather than saying why.
+& $Python -m pip install --pre -r (Join-Path $PSScriptRoot 'requirements-tf-amd-directml.txt')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $Python -c "import tensorflow as tf; devices = tf.config.list_physical_devices('GPU'); print('TensorFlow GPUs:', devices); assert devices, 'DirectML did not expose an AMD GPU to TensorFlow'"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
