@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frc-video-scouting/configs/scouting_profile.schema.json",
+  "title": "Season scouting profile (non-contract)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "season", "objective_metrics", "subjective_ratings", "forecast"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "season": { "type": "integer", "minimum": 1992 },
+    "objective_metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "source", "aggregation"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "label": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "enum": ["event", "derived"] },
+          "event_type": { "type": ["string", "null"] },
+          "goal": { "type": ["string", "null"] },
+          "aggregation": { "type": "string", "enum": ["count", "points", "median_seconds", "seconds"] },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "subjective_ratings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "min", "max", "weight"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "label": { "type": "string", "minLength": 1 },
+          "min": { "type": "number" },
+          "max": { "type": "number" },
+          "weight": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "forecast": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "window_matches"],
+      "properties": {
+        "method": { "type": "string", "enum": ["moving_average", "linear_trend"] },
+        "window_matches": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "season": 2026,
+  "objective_metrics": [
+    {
+      "id": "primary_scoring_actions",
+      "label": "Primary scoring actions",
+      "source": "event",
+      "event_type": "shot_made",
+      "goal": null,
+      "aggregation": "count",
+      "description": "Rename and optionally filter by the season's legal goal names. This replaces a hardcoded game-piece label such as Fuel Scored."
+    },
+    {
+      "id": "points_contributed",
+      "label": "Points contributed",
+      "source": "derived",
+      "event_type": null,
+      "goal": null,
+      "aggregation": "points",
+      "description": "Derived from the season config's point_values, never guessed by the model."
+    },
+    {
+      "id": "cycle_time",
+      "label": "Cycle time",
+      "source": "derived",
+      "event_type": null,
+      "goal": null,
+      "aggregation": "median_seconds",
+      "description": "Median time between reload events."
+    }
+  ],
+  "subjective_ratings": [
+    { "id": "driving", "label": "Driving", "min": 1, "max": 10, "weight": 0.5 },
+    { "id": "scoring", "label": "Scoring", "min": 1, "max": 10, "weight": 0.35 },
+    { "id": "defense", "label": "Defense", "min": 1, "max": 10, "weight": 0.15 }
+  ],
+  "forecast": { "method": "moving_average", "window_matches": 3 }
+}
