@@ -161,5 +161,59 @@ class FuseWriteTests(unittest.TestCase):
             self.assertEqual(len(path.read_text(encoding="utf-8").strip().splitlines()), 1)
 
 
+
+class RfDetrDecodeTests(unittest.TestCase):
+    """RF-DETR's output format differs from YOLO's; the decode must match the C++ authority.
+
+    The model call is not exercised here (no ONNX in the test env), but the decode contract is:
+    dets are cxcywh and must come out as top-left xywh, and the robot class is read through a
+    sigmoid. A stub session lets that arithmetic be checked without weights.
+    """
+
+    def test_center_form_dets_become_top_left(self):
+        import numpy as np
+        from ingest.collection.detect_runner import RfDetrDetector
+
+        d = RfDetrDetector.__new__(RfDetrDetector)
+        d.name, d.confidence_threshold, d.input_size = "rfdetr", 0.25, 640
+        d.robot_class_id, d.nms_iou = 0, 0.5
+
+        class Stub:
+            def get_inputs(self):
+                class I: name = "input"
+                return [I()]
+            def run(self, _out, _feed):
+                # one query: centre (0.5,0.5) size (0.2,0.4); robot logit high, other low
+                dets = np.array([[[0.5, 0.5, 0.2, 0.4]]], np.float32)
+                labels = np.array([[[3.0, -5.0]]], np.float32)
+                return [dets, labels]
+        d._session = Stub()
+
+        boxes = d.detect(np.zeros((720, 1280, 3), np.uint8))
+        self.assertEqual(len(boxes), 1)
+        b = boxes[0]
+        self.assertAlmostEqual(b["x"], 0.4, places=5)   # 0.5 - 0.2/2
+        self.assertAlmostEqual(b["y"], 0.3, places=5)   # 0.5 - 0.4/2
+        self.assertGreater(b["confidence"], 0.9)         # sigmoid(3.0)
+
+    def test_the_dead_class_is_not_reported(self):
+        import numpy as np
+        from ingest.collection.detect_runner import RfDetrDetector
+        d = RfDetrDetector.__new__(RfDetrDetector)
+        d.name, d.confidence_threshold, d.input_size = "rfdetr", 0.25, 640
+        d.robot_class_id, d.nms_iou = 0, 0.5
+
+        class Stub:
+            def get_inputs(self):
+                class I: name = "input"
+                return [I()]
+            def run(self, _o, _f):
+                return [np.array([[[0.5,0.5,0.2,0.2]]],np.float32),
+                        np.array([[[-6.0, 4.0]]],np.float32)]   # robot class low
+        d._session = Stub()
+        self.assertEqual(d.detect(np.zeros((720,1280,3),np.uint8)), [])
+
+
+
 if __name__ == "__main__":
     unittest.main()

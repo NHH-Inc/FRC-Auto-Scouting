@@ -110,6 +110,69 @@ class OnnxDetector:
         return non_max_suppression(boxes, self.nms_iou)
 
 
+@dataclass
+class RfDetrDetector:
+    """An RF-DETR ONNX export.
+
+    The output format is DETR's, not YOLO's, and the decode matches analysis/src/RFDetrDetector.cpp
+    exactly -- that C++ file is the authority for how this project reads an RF-DETR export, and two
+    decoders that disagree would produce different boxes from one model. Specifically:
+
+      * two outputs, `dets` (1, queries, 4) in normalised cxcywh and `labels` (1, queries, classes);
+      * a fixed query set, so there is no confidence-free anchor grid to threshold -- every query
+        is scored and the low ones dropped;
+      * ImageNet mean/std normalisation after /255, where YOLO uses a bare /255; and
+      * a plain resize to square, where our YOLO path letterboxes. RF-DETR trains on the stretched
+        square, so matching that at inference is correct rather than a shortcut.
+    """
+
+    model_path: str
+    name: str = "rfdetr"
+    confidence_threshold: float = 0.25
+    input_size: int = 640
+    robot_class_id: int = 0        # this export puts robot at class 0; class 1 is inert
+    nms_iou: float = 0.50
+    _session: object = None
+
+    def __post_init__(self):
+        import onnxruntime as ort
+        self._session = ort.InferenceSession(
+            self.model_path, providers=["CPUExecutionProvider"]
+        )
+
+    def detect(self, image_bgr) -> list[dict]:
+        import numpy as np
+        import cv2
+
+        mean = np.array([0.485, 0.456, 0.406], np.float32)
+        std = np.array([0.229, 0.224, 0.225], np.float32)
+        resized = cv2.resize(image_bgr[:, :, ::-1], (self.input_size, self.input_size),
+                             interpolation=cv2.INTER_LINEAR).astype(np.float32) / 255.0
+        blob = ((resized - mean) / std).transpose(2, 0, 1)[None]
+
+        name = self._session.get_inputs()[0].name
+        dets, labels = self._session.run(None, {name: blob})
+        dets, labels = dets[0], labels[0]
+
+        scores = 1.0 / (1.0 + np.exp(-labels[:, self.robot_class_id]))
+        boxes = []
+        for i in range(dets.shape[0]):
+            score = float(scores[i])
+            if score < self.confidence_threshold:
+                continue
+            cx, cy, w, h = (float(v) for v in dets[i])
+            x = cx - w / 2.0
+            y = cy - h / 2.0
+            boxes.append({
+                "x": max(0.0, min(1.0, x)),
+                "y": max(0.0, min(1.0, y)),
+                "w": max(0.0, min(1.0, w)),
+                "h": max(0.0, min(1.0, h)),
+                "confidence": score,
+            })
+        return non_max_suppression(boxes, self.nms_iou)
+
+
 def non_max_suppression(boxes: list[dict], iou_threshold: float = 0.50) -> list[dict]:
     """Collapse overlapping candidates to one box per object.
 
