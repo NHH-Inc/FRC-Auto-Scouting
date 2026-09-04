@@ -128,14 +128,26 @@ def _dots(d, cx, cy, s, colour):
 
 
 def _merge(d, cx, cy, s, colour):
-    w = int(s * 0.05)
-    r = s * 0.05
-    d.line([(cx - s * 0.12, cy - s * 0.16), (cx - s * 0.12, cy + s * 0.16)], fill=colour, width=w)
-    d.arc([cx - s * 0.12, cy - s * 0.08, cx + s * 0.16, cy + s * 0.2], 270, 360,
-          fill=colour, width=w)
-    for px, py in ((cx - s * 0.12, cy - s * 0.16), (cx - s * 0.12, cy + s * 0.16),
-                   (cx + s * 0.16, cy + s * 0.04)):
-        d.ellipse([px - r, py - r, px + r, py + r], fill=colour)
+    """A branch rejoining the trunk.
+
+    The first attempt drew the arc sweeping outward, so the branch curved away and dead-ended in
+    empty space -- a fork, not a merge, and visibly wrong once blown up. The arc has to be centred
+    ON the trunk at the branch's height, so sweeping from 0 to 90 degrees lands it back on the
+    trunk line rather than beside it.
+    """
+    w = int(s * 0.055)
+    r_dot = s * 0.055
+    trunk_x = cx - s * 0.11
+    top_y, bottom_y = cy - s * 0.19, cy + s * 0.19
+    branch_x, branch_y = cx + s * 0.15, cy - s * 0.13
+    radius = branch_x - trunk_x
+
+    d.line([(trunk_x, top_y), (trunk_x, bottom_y)], fill=colour, width=w)
+    # Centre on the trunk, at the branch's height: 0deg is the branch, 90deg is the trunk below.
+    d.arc([trunk_x - radius, branch_y - radius, trunk_x + radius, branch_y + radius],
+          0, 90, fill=colour, width=w)
+    for px, py in ((trunk_x, top_y), (trunk_x, bottom_y), (branch_x, branch_y)):
+        d.ellipse([px - r_dot, py - r_dot, px + r_dot, py + r_dot], fill=colour)
 
 
 def emoji_bbox(size=128):
