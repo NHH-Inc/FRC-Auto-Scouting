@@ -21,7 +21,7 @@ from starlette.concurrency import run_in_threadpool
 
 # Must run before database/TBA/Sheets read os.environ. See ingest/settings.py.
 from . import settings  # noqa: F401
-from . import database, downloader, models, orchestrator, sheets, stats, tba
+from . import apps_script_sheets, database, downloader, models, orchestrator, sheets, stats, tba
 from .corrections import apply_corrections, apply_track_corrections
 from .serializers import (
     JOB_STATUSES,
@@ -92,6 +92,22 @@ SEASONS_DIR = Path(__file__).resolve().parent.parent / "contracts" / "seasons"
 
 tba_client = tba.TBAClient()
 sheets_exporter = sheets.SheetsExporter()
+#: Alternative transport for accounts where an administrator has disabled Google Cloud, which is
+#: normal for school Workspace accounts. Same row semantics, no service account required.
+apps_script_exporter = apps_script_sheets.AppsScriptExporter()
+
+
+def _active_exporter():
+    """Whichever transport is configured, preferring the Cloud one when both are.
+
+    Both write the same rows with the same stable keys, so which one runs is an account-access
+    question rather than a behavioural one.
+    """
+    if sheets_exporter.configured:
+        return sheets_exporter, "service_account"
+    if apps_script_exporter.configured:
+        return apps_script_exporter, "apps_script"
+    return sheets_exporter, "none"
 
 
 def _season_path(season: int) -> Path:
@@ -807,21 +823,34 @@ def export_to_sheets(payload: dict, db: Session = Depends(get_db)):
         per_match.append((match_id, events, stats_list))
 
     headers, rows = sheets.build_rows(mode, per_match)
-    result = sheets_exporter.export(mode, headers, rows)
+    exporter, transport = _active_exporter()
+    result = exporter.export(mode, headers, rows)
 
     if not result.get("configured"):
         # Be honest rather than reporting a successful write that did not happen.
         raise HTTPException(
             status_code=503,
             detail=(
-                "Sheets export is not configured. Set SHEETS_SPREADSHEET_ID and "
-                "GOOGLE_APPLICATION_CREDENTIALS, and share the sheet with the service account."
+                "Sheets export is not configured. Either set SHEETS_SPREADSHEET_ID and "
+                "GOOGLE_APPLICATION_CREDENTIALS and share the sheet with the service account, "
+                "or -- if Google Cloud is disabled on the account, as it is on most school "
+                "accounts -- deploy tools/apps-script/Code.gs as a Web App and set "
+                "APPS_SCRIPT_URL and APPS_SCRIPT_SECRET. See tools/apps-script/README.md."
             ),
         )
 
+    if result.get("error"):
+        # The write was attempted and refused. A wrong shared secret lands here, and saying so
+        # beats reporting a success that wrote nothing.
+        raise HTTPException(status_code=502, detail=f"Sheets export failed: {result['error']}")
+
     return {
-        "spreadsheet_id": sheets_exporter.spreadsheet_id,
-        "spreadsheet_url": sheets_exporter.spreadsheet_url(),
+        "spreadsheet_id": getattr(exporter, "spreadsheet_id", ""),
+        "spreadsheet_url": (
+            exporter.spreadsheet_url() if callable(getattr(exporter, "spreadsheet_url", None))
+            else getattr(exporter, "spreadsheet_url", "")
+        ),
+        "transport": transport,
         "mode": mode,
         "rows_written": result["rows_written"],
         "rows_skipped": result["rows_skipped"],
