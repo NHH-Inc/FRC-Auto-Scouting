@@ -431,6 +431,12 @@ def import_results(db: Session, job, results: dict):
                 )
             )
 
+    # A re-analysis supersedes the previous one rather than adding to it. Events are guarded by
+    # their event_id above; tracks had no such guard, so retrying a job silently doubled every
+    # track -- 45 became 90 -- and with them every count downstream. Track ids are stable within
+    # a job, so track-scoped corrections still apply after this.
+    db.query(models.Track).filter(models.Track.job_id == job.job_id).delete()
+
     with open(results["tracks_path"], "r", encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():

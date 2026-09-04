@@ -186,3 +186,194 @@ def read_roster(video_path, sample_times, fps: float) -> dict[str, list[int]]:
     if frames == 0:
         return {"red": [], "blue": []}
     return roster_from_counts(counts, frames)
+
+
+#: Dilation used to sample what surrounds a glyph, in pixels.
+SCORE_RING = 6
+
+
+def _surrounding_colour(hsv, component):
+    """red, blue or white, from the hue immediately around a glyph."""
+    import cv2
+    import numpy as np
+
+    ring = cv2.subtract(
+        cv2.dilate(component, np.ones((SCORE_RING * 2 + 1,) * 2, np.uint8)), component)
+    selected = ring > 0
+    if selected.sum() < 20:
+        return None
+    hue, sat = hsv[..., 0][selected], hsv[..., 1][selected]
+    strong = sat > 90
+    if strong.sum() < 0.25 * selected.sum():
+        return "white"
+    coloured = hue[strong]
+    red = int(((coloured < 10) | (coloured > 170)).sum())
+    blue = int(((coloured > 100) & (coloured < 135)).sum())
+    return "red" if red > blue else "blue"
+
+
+def read_alliance_scores(frame) -> tuple[int | None, int | None]:
+    """(red, blue) as shown on the scoreboard, or None for either that could not be read.
+
+    Read across the whole bar rather than inside the alliance cells. The score's white digits are
+    tall enough to break the run of alliance colour that defines a cell, so the cell boundary
+    stops exactly where the score starts -- searching inside one finds the 30x30 team logos and
+    calls them the score.
+
+    The three big numbers on the bar are the two scores and the timer between them. They are
+    separated by the colour immediately around each, which is the same reasoning that finds bumper
+    digits: the glyph is not distinctive, its background is.
+
+    A score is not a shot count. This reports what the broadcast says; turning it into scoring
+    events is `action_extraction`'s job, and needs the season's point values to go further.
+    """
+    import re
+
+    import cv2
+    import numpy as np
+
+    if not tesseract_available():
+        return None, None
+    cells = find_cells(frame)
+    if not cells:
+        return None, None
+
+    left = cells["red"][0]
+    right = cells["blue"][1]
+    top, bottom = cells["red"][2], cells["red"][3]
+    bar = frame[top:bottom + 1, left:right + 1]
+    if bar.size == 0:
+        return None, None
+
+    hsv = cv2.cvtColor(bar, cv2.COLOR_BGR2HSV)
+    white = ((hsv[..., 2] > 150) & (hsv[..., 1] < 90)).astype(np.uint8) * 255
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(white, connectivity=8)
+
+    bar_height = bar.shape[0]
+    big = []
+    for i in range(1, count):
+        x, y, w, h, area = stats[i]
+        # A score digit is tall and taller than it is wide. A team logo is square; a team number
+        # is under half this height.
+        if h >= bar_height * 0.28 and w < h * 0.85 and area >= 60:
+            big.append((i, x, y, w, h))
+
+    grouped: dict[str, list] = {"red": [], "blue": []}
+    for i, x, y, w, h in big:
+        where = _surrounding_colour(hsv, (labels == i).astype(np.uint8) * 255)
+        if where in grouped:
+            grouped[where].append((i, x, y, w, h))
+
+    out: dict[str, int | None] = {}
+    for side in ("red", "blue"):
+        items = sorted(grouped[side], key=lambda g: g[1])
+        if not items:
+            out[side] = None
+            continue
+        keep = np.zeros_like(white)
+        for i, *_ in items:
+            keep[labels == i] = 255
+        x0 = max(0, min(g[1] for g in items) - 3)
+        y0 = max(0, min(g[2] for g in items) - 3)
+        x1 = max(g[1] + g[3] for g in items) + 3
+        y1 = max(g[2] + g[4] for g in items) + 3
+        crop = keep[y0:y1, x0:x1]
+        if crop.size == 0:
+            out[side] = None
+            continue
+        big_crop = cv2.resize(crop, None, fx=UPSCALE, fy=UPSCALE, interpolation=cv2.INTER_CUBIC)
+        big_crop = cv2.copyMakeBorder(big_crop, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=0)
+        text = pytesseract.image_to_string(
+            cv2.bitwise_not(big_crop),
+            config="--psm 7 -c tessedit_char_whitelist=0123456789").strip()
+        digits = re.sub(r"\D", "", text)
+        out[side] = int(digits) if digits and len(digits) <= 3 else None
+    return out.get("red"), out.get("blue")
+
+
+def read_match_timer(frame) -> int | None:
+    """Seconds remaining on the match clock, from the timer between the two scores.
+
+    This is doc 0's 2.1, and it is what makes every phase boundary real rather than assumed. A
+    clip is not a match: this one runs 215 seconds around 150 seconds of play, so timing phases
+    from the start of the file puts auto, teleop and endgame in the wrong places and attributes
+    events to the wrong period.
+
+    The timer is already isolated by `read_alliance_scores` -- it is the big number whose
+    surroundings are white rather than alliance-coloured -- so this only has to read it. Digits
+    only: the colon is dropped and the halves are recovered by length, because a colon at this
+    size is two specks that Tesseract reads as a 1, an 8, or nothing at all.
+    """
+    import re
+
+    import cv2
+    import numpy as np
+
+    if not tesseract_available():
+        return None
+    cells = find_cells(frame)
+    if not cells:
+        return None
+
+    left, right = cells["red"][0], cells["blue"][1]
+    top, bottom = cells["red"][2], cells["red"][3]
+    bar = frame[top:bottom + 1, left:right + 1]
+    if bar.size == 0:
+        return None
+
+    hsv = cv2.cvtColor(bar, cv2.COLOR_BGR2HSV)
+    # The timer is the one number on the bar that is DARK on light: it sits in a white box
+    # between the two scores, which are light on alliance colour. Masking for white finds the
+    # box, not the digits -- the first attempt read nothing on all 22 samples for exactly that.
+    white_box = ((hsv[..., 2] > 150) & (hsv[..., 1] < 90)).astype(np.uint8) * 255
+    dark = ((hsv[..., 2] < 110) & (hsv[..., 1] < 120)).astype(np.uint8) * 255
+    # Only dark pixels sitting inside the white box are timer digits; everything else dark on the
+    # bar is a team logo or the gap between cells.
+    inside = cv2.erode(white_box, np.ones((9, 9), np.uint8))
+    inside = cv2.dilate(inside, np.ones((25, 25), np.uint8))
+    dark = cv2.bitwise_and(dark, inside)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(dark, connectivity=8)
+
+    bar_height = bar.shape[0]
+    timer = []
+    for i in range(1, count):
+        x, y, w, h, area = stats[i]
+        if h >= bar_height * 0.28 and w < h * 1.1 and area >= 40:
+            timer.append((i, x, y, w, h))
+    if not timer:
+        return None
+
+    timer.sort(key=lambda g: g[1])
+    keep = np.zeros_like(dark)
+    for i, *_ in timer:
+        keep[labels == i] = 255
+    x0 = max(0, min(g[1] for g in timer) - 3)
+    y0 = max(0, min(g[2] for g in timer) - 3)
+    x1 = max(g[1] + g[3] for g in timer) + 3
+    y1 = max(g[2] + g[4] for g in timer) + 3
+    crop = keep[y0:y1, x0:x1]
+    if crop.size == 0:
+        return None
+    big = cv2.resize(crop, None, fx=UPSCALE, fy=UPSCALE, interpolation=cv2.INTER_CUBIC)
+    big = cv2.copyMakeBorder(big, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=0)
+    text = pytesseract.image_to_string(
+        cv2.bitwise_not(big), config="--psm 7 -c tessedit_char_whitelist=0123456789").strip()
+    return timer_seconds(re.sub(r"\D", "", text))
+
+
+def timer_seconds(digits: str) -> int | None:
+    """Turn the digits of a match clock into seconds remaining.
+
+    The colon never survives OCR at this size, so the split is recovered by length: the last two
+    digits are always seconds, and whatever precedes them is minutes. "220" is 2:20, not 220
+    seconds, and reading it as the latter would put the match start over three minutes wrong.
+    """
+    if not digits or len(digits) > 4:
+        return None
+    if len(digits) <= 2:
+        seconds, minutes = int(digits), 0
+    else:
+        seconds, minutes = int(digits[-2:]), int(digits[:-2])
+    if seconds > 59 or minutes > 15:
+        return None
+    return minutes * 60 + seconds
