@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 560" width="1024" height="560" role="img" aria-label="Tengen">
+  <title>Tengen</title>
+
+  <!--
+    A redraw rather than a filter pass. What reads as "AI" in the original is soft airbrushed
+    bevels, a compass rose whose points are all slightly different lengths, and a hexagon that
+    does not quite close. All three are things a person drawing this deliberately would not do.
+
+    So this is built from construction rather than shading: one hexagon on an exact 60-degree
+    grid, an eight-point star on exact 45-degree axes, and a single flat gradient used sparingly
+    for depth instead of a glow on every edge. Same navy and steel as the original.
+
+    Tengen (天元) is the centre point of a go board – hence the marked centre, and the four
+    cardinal axes reaching out of it.
+  -->
+
+  <defs>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0"   stop-color="#f2f6fa"/>
+      <stop offset="0.5" stop-color="#c3ced9"/>
+      <stop offset="1"   stop-color="#8fa0b3"/>
+    </linearGradient>
+    <linearGradient id="steelDim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0"   stop-color="#9aa9bb"/>
+      <stop offset="1"   stop-color="#6b7d92"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="560" fill="#16233a"/>
+
+  <g transform="translate(512 232)">
+
+    <!-- Hexagon, flat-top, vertices on exact 60-degree steps at r=150. -->
+    <polygon points="75,-129.9 -75,-129.9 -150,0 -75,129.9 75,129.9 150,0"
+             fill="none" stroke="url(#steel)" stroke-width="9" stroke-linejoin="miter"/>
+
+    <!-- Inner ring: a reference circle, thin, so the star has something to sit against. -->
+    <circle r="96" fill="none" stroke="url(#steelDim)" stroke-width="2.5" opacity="0.55"/>
+    <circle r="62" fill="none" stroke="url(#steelDim)" stroke-width="1.5" opacity="0.35"/>
+
+    <!-- Eight-point star. Cardinals long, diagonals short, every point a clean isoceles kite. -->
+    <g fill="url(#steel)">
+      <!-- N / S / E / W -->
+      <polygon points="0,-138 14,-30 0,0 -14,-30"/>
+      <polygon points="0,138  14,30  0,0  -14,30"/>
+      <polygon points="138,0  30,14  0,0  30,-14"/>
+      <polygon points="-138,0 -30,14 0,0 -30,-14"/>
+    </g>
+    <g fill="url(#steelDim)">
+      <!-- NE / SE / SW / NW at exactly 45 degrees, 0.52 of the cardinal reach -->
+      <polygon points="50.9,-50.9 12,-19 0,0 -19,12"/>
+      <polygon points="50.9,50.9  19,12  0,0  -12,19"/>
+      <polygon points="-50.9,50.9 -12,19 0,0 19,-12"/>
+      <polygon points="-50.9,-50.9 -19,-12 0,0 12,-19"/>
+    </g>
+
+    <!-- The centre point the name refers to. -->
+    <circle r="15" fill="#16233a" stroke="url(#steel)" stroke-width="6"/>
+
+    <!-- Two nodes on the vertical axis, echoing the original's dumbbell. -->
+    <circle cx="0" cy="-150" r="16" fill="#16233a" stroke="url(#steel)" stroke-width="8"/>
+    <circle cx="0" cy="150"  r="16" fill="#16233a" stroke="url(#steel)" stroke-width="8"/>
+  </g>
+
+  <!-- Wordmark. Wide tracking, no bevel, no shadow. -->
+  <text x="512" y="470"
+        font-family="'Inter','Segoe UI',Helvetica,Arial,sans-serif"
+        font-size="96" font-weight="600" letter-spacing="26"
+        text-anchor="middle" fill="url(#steel)">TENGEN</text>
+</svg>
