@@ -152,6 +152,28 @@ The analyzer has no notion of a region of interest. It needs one, per video sour
 2.1 already says the OCR crop must be. Until then, per-team counts from footage like this are
 inflated and nothing in the output says so.
 
+### Recall on 2026 footage is the real problem, and it is not one venue
+
+Chasing the missed lower-right robots turned up something larger. Twelve venues sampled at random
+returned **one to five detections per frame in a six-robot match**, on robots plainly visible to a
+person. Every one of those twelve has the same stacked two-camera layout, so the second view is
+not an Istanbul quirk -- it is the standard 2026 broadcast format, and the detector is weak on all
+of it.
+
+That reframes what v2's numbers meant. Its 0.864 recall was measured against 2023-24 images with
+2023-24 framing, and it is honest for that. The 2026 season is shot differently, and no amount of
+threshold or resolution work closes a gap of this kind.
+
+It also raises the stakes for September. Tengen will be fed footage **we** record from the stands,
+which is further again from 2023-24 broadcast framing than any of this. Labelled 2026 frames are
+now the single highest-value thing anyone can contribute.
+
+`ingest/collection/label_pack.py` builds a pack: frames drawn round-robin across every venue so a
+budget is never spent on one arena, broadcast graphics filtered out, and the current detector's
+boxes pre-filled so a labeller corrects rather than draws. The first pack is 400 frames from 59
+venues with 1,402 proposals -- roughly 3.5 per frame, which is itself the measurement, since six
+robots play every match.
+
 ### Some robots are invisible to the detector, and it is the viewpoint
 
 In a frame where a human can plainly see them, robots in the lower-right region are not detected.
@@ -204,7 +226,8 @@ forever, and nobody checks a number that looks reasonable.
 | 2.5 | **Region of interest per video source** | Justin | Some venues put a second view of the same field in one frame, and every robot in it is counted twice. Same shape of config as 2.1's OCR crop, and worth doing at the same time. |
 | 2.6 | ~~**Detector threshold on real footage**~~ | anyone | **Measured, and it is not the threshold.** Robots visible in the lower-right of a real frame are missed at 0.35 and still missed at **0.05** -- the model does not see them at all. See below. |
 | 2.7 | ~~**Tiled inference**~~ | Justin | **Done 2026-09-04**, and it does *not* fix 2.6 — that was the wrong hypothesis, see below. It is still worth having: median robots on screen went 4 to 5 of 6, boxes +29%, longest track 150s to 170s. Costs 4.8x the inference (35s to 167s a match). `tile_size` in the detector config; 0 disables. |
-| 2.9 | **Label the overhead viewpoint** | everyone | The actual fix for 2.6, and it needs human labels because the detector cannot propose what it cannot see. A few hundred boxes on second-field frames, then retrain. |
+| 2.9 | **Label 2026 footage** | everyone | **Pack is built and waiting**: `data/label-packs/v3-viewpoint`, 400 frames across 59 venues, 232 MB. Instructions ship inside it. This is the bottleneck and it parallelises across as many people as want to help. |
+| 2.10 | **Train robot-v3 on the returned labels** | Justin | Merge the pack back with `dataset_merge`, train on the AMD GPU as v2 was, into a **new** folder. |
 | 2.8 | **Bumper OCR accuracy** | Justin | 8 of 34 tracks attributed on the first real match. The scoreboard roster is solid (6/6 teams, 7/7 frames); the weak link is the digit read. Worth measuring against a hand-labelled match before tuning further. |
 
 ## Phase 3 — Operations

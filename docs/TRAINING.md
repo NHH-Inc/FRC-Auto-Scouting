@@ -450,6 +450,38 @@ box-for-box against `detect_runner.py` on real frames before it was trusted.
 Resolution comes from the model too. If you set `input_width`/`input_height` and they contradict
 the export, the analyzer refuses to run rather than quietly mis-scaling every box.
 
+## Getting frames labelled by people
+
+The detector cannot start this one. On 2026 footage it returns one to five robots per frame where
+six are playing, and in the second of the two stacked camera views it returns nothing at all --
+not at a lower threshold, not tiled, not at 3x magnification. A machine labelling loop can only
+propose what the detector already sees, so a gap this shape needs people.
+
+```powershell
+python -m ingest.collection.label_pack --segments data\segments --out data\label-packs\v3 --frames 400 --model data\robot-v2.onnx
+```
+
+That writes a YOLO folder -- `images/`, `labels/`, `data.yaml`, `manifest.json` and a `README.md`
+of instructions for whoever is labelling. Roboflow, CVAT and LabelImg all import it directly.
+
+Frames are drawn round-robin across every segment, so a pack covers every venue before it takes a
+second frame from any of them. Venue count is what buys generalisation: thresholds tuned on ten
+venues here did not survive twenty-five.
+
+**Tell your labellers the one rule.** Every robot in the frame, or skip the frame. A frame with
+four robots boxed and two missed does not merely fail to teach -- unlabelled pixels are treated as
+background, so it actively teaches that robots are background. Skipping costs nothing; guessing
+costs the model. It is in the pack's README too, but say it out loud.
+
+When labels come back, merge and retrain into a **new** folder. A pack whose labels are
+still empty is dropped rather than merged -- an unlabelled image is not a negative example,
+and asserting "no robots here" about a frame nobody looked at is how a dataset poisons a
+model:
+
+```powershell
+python -m ingest.collection.dataset_merge --into data\datasets\frc-robots-v3 data\datasets\frc-robots-v2 data\label-packs\v3-viewpoint
+```
+
 ## When it goes wrong
 
 | Symptom | What to do |

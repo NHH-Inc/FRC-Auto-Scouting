@@ -156,3 +156,23 @@ class RegroupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_a_flat_labelling_pack_is_read(tmp_path):
+    """A returned human pack has images/ and labels/ with no splits.
+
+    Without this the merge finds nothing and reports success, which is the worst possible
+    outcome: a day of volunteer labelling silently discarded.
+    """
+    from ingest.collection.dataset_merge import group_by_source
+
+    (tmp_path / "images").mkdir()
+    (tmp_path / "labels").mkdir()
+    (tmp_path / "images" / "clip_00001.jpg").write_bytes(b"x")
+    (tmp_path / "labels" / "clip_00001.txt").write_text("0 0.5 0.5 0.1 0.1\n")
+
+    groups = group_by_source(tmp_path)
+    assert len(groups) == 1
+    (image, label), = next(iter(groups.values()))
+    assert image.name == "clip_00001.jpg"
+    assert label.exists()

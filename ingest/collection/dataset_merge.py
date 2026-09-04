@@ -123,11 +123,16 @@ def group_by_source(root: Path) -> dict[str, list[tuple[Path, Path]]]:
 
     Deliberately ignores which split the source put a copy in. That information is what is being
     discarded, because it is what carries the leak.
+
+    A flat `images/` + `labels/` pair is also accepted. That is the shape a human labelling pack
+    comes back in -- labellers should not have to think about splits, and this function is going
+    to reassign them anyway. Without it a returned pack merges to silently nothing.
     """
     groups: dict[str, list[tuple[Path, Path]]] = {}
-    for split in ("train", "valid", "test"):
-        images_dir = root / split / "images"
-        labels_dir = root / split / "labels"
+    layouts = [(root / split / "images", root / split / "labels")
+               for split in ("train", "valid", "test")]
+    layouts.append((root / "images", root / "labels"))
+    for images_dir, labels_dir in layouts:
         if not images_dir.is_dir():
             continue
         for image in sorted(images_dir.iterdir()):
@@ -242,3 +247,58 @@ def write_dataset_yaml(out_dir: Path) -> None:
         "names: ['robot']\n",
         encoding="utf-8",
     )
+
+
+def main(argv=None) -> int:
+    """Merge YOLO datasets into one, regrouped by source image and re-split.
+
+    Exists so the documented way to fold returned human labels back in is a command someone can
+    actually run. The merging itself was already here; only the entry point was missing.
+
+        python -m ingest.collection.dataset_merge --into data/datasets/frc-robots-v3 \
+            data/datasets/frc-robots-v2 data/label-packs/v3-viewpoint
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Merge YOLO datasets, re-splitting by source.")
+    parser.add_argument("sources", nargs="+", type=Path, help="YOLO dataset roots to merge")
+    parser.add_argument("--into", required=True, type=Path, help="new output directory")
+    parser.add_argument("--keep-empty", action="store_true",
+                        help="keep images whose label file is empty; they teach 'no robots here'")
+    parser.add_argument("--copies-per-source", type=int, default=1,
+                        help="augmented copies to keep per source photograph")
+    args = parser.parse_args(argv)
+
+    if args.into.exists() and any(args.into.iterdir()):
+        # Never overwrite a dataset: a reviewed one cannot be rebuilt, and a silently merged one
+        # cannot be told apart from the version a model was trained on.
+        print(f"{args.into} already exists and is not empty. Use a new directory.")
+        return 1
+
+    stats = MergeStats()
+    for source in args.sources:
+        if not source.is_dir():
+            print(f"not a directory: {source}")
+            return 1
+        names = read_yolo_names(source) or ["robot"]
+        merge_yolo_source(source, names, args.into, source.name, stats,
+                          keep_empty=args.keep_empty,
+                          copies_per_source=args.copies_per_source)
+        print(f"  merged {source}  (classes: {', '.join(names)})")
+
+    write_dataset_yaml(args.into)
+    print(f"\nsources {stats.sources_in} -> kept {stats.sources_kept}")
+    print(f"images  {stats.images_in} -> kept {stats.images_kept}")
+    print(f"boxes   {stats.boxes_in}")
+    if stats.images_without_robots:
+        print(f"{stats.images_without_robots} images had no robot labels and were "
+              f"{'kept' if args.keep_empty else 'dropped'}")
+    if stats.dropped_classes:
+        print("dropped classes: " + ", ".join(f"{k} {v}" for k, v in sorted(
+            stats.dropped_classes.items())))
+    print(f"\nwrote {args.into}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
