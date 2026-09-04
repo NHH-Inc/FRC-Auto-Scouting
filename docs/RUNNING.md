@@ -70,6 +70,36 @@ hand-placed box is a detection.
 
 ---
 
+## Team identification needs Tesseract
+
+Optional, and everything else works without it: with no Tesseract, every track simply stays
+unattributed, which is the same honest degradation as a missing TBA key or a missing model.
+
+```powershell
+winget install --id UB-Mannheim.TesseractOCR
+```
+
+The Python side finds it on PATH, or set `TESSERACT_CMD` to the binary:
+
+```powershell
+$env:TESSERACT_CMD = "C:\Program Files\Tesseract-OCR\tesseract.exe"
+```
+
+Then, on a run that already has `tracks.jsonl`:
+
+```powershell
+python -m ingest.attribute_tracks --job data\jobs\<id>\job.json --tracks data\jobs\<id>\tracks.jsonl --out data\jobs\<id>\tracks.attributed.jsonl
+```
+
+It reads the roster off the broadcast scoreboard when the job has no TBA alliances, reads the
+bumpers, and votes across each track. The input file is never modified.
+
+**This lives in Python, and doc 0 says component 1 owns OCR.** That is a deliberate deviation, not
+an oversight: it was built where it could be tuned in minutes rather than rebuild cycles, and
+where the accuracy could be measured before committing the team to a vcpkg Tesseract dependency
+on everyone's machine. Port it to C++ once the accuracy is worth freezing — the algorithm is the
+part that was expensive, and it is written down.
+
 ## Part 1 — one-time setup
 
 Do this once per machine. Three separate steps, each in a **different folder**.
