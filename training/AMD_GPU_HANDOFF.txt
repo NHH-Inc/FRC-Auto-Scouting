@@ -1,7 +1,10 @@
 Project Tengen - AMD GPU training handoff (native Windows)
 ===========================================================
 
-STATUS: BLOCKED. Do not spend time on this route until the blocker below is solved.
+STATUS: DEAD END -- but AMD training DOES work. See AMD_GPU_WSL.md.
+Verified working on an RX 7800 XT via WSL2 + Ubuntu 22.04 + ROCm 6.4.4 + PyTorch ROCm,
+producing an ONNX identical to the NVIDIA-trained one. Everything below documents why
+the TWO DirectML routes failed; it is kept so nobody retries them, not as a to-do.
 ------------------------------------------------------------------------------------
 Tested end to end on an AMD Radeon RX 7800 XT, 2026-09-03. Two of the three stages work:
 
