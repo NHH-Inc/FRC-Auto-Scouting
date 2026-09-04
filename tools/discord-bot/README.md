@@ -103,3 +103,34 @@ The setup bot created `#general` and `#announcements` without knowing the server
 them, with messages in. The fix was to keep the originals, move them into the new categories, and
 delete the empty duplicates — never the other way round. Anything holding even one message is
 left alone.
+
+## Community mode and safety (done 2026-09-03)
+
+Community is on, which is the gate for the server description, discovery and welcome screen.
+Discord requires all of these together, so they were set in one edit:
+
+| setting | value |
+|---|---|
+| rules channel | `#rules` |
+| Discord's own notices | `#mod-log` |
+| verification | Medium |
+| explicit media filter | all members |
+
+AutoMod runs three rules: **Blocked words** (Discord's maintained profanity / sexual-content /
+slurs presets), **Invite links**, and **Mention spam** (limit 6). Maintainer and Developer are
+exempt.
+
+The presets are deliberate. A hand-written word list is stale the day it is committed and turns
+moderation into an argument about edge cases; Discord maintains theirs.
+
+## What still needs a person
+
+**Emojis, stickers and soundboard sounds** can be uploaded through the API, but they need actual
+files — art and audio this repository does not have. Drop images in and they can be added in one
+pass; inventing placeholder art would just be clutter someone has to delete.
+
+**Inviting other bots** cannot be scripted: adding a bot is an OAuth consent screen in a browser,
+under your account, by design.
+
+**Discovery traits** need the server to meet Discord's discovery thresholds (member count and
+activity) before the fields become editable at all.
