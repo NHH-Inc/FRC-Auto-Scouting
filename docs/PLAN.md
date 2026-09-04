@@ -152,6 +152,20 @@ The analyzer has no notion of a region of interest. It needs one, per video sour
 2.1 already says the OCR crop must be. Until then, per-team counts from footage like this are
 inflated and nothing in the output says so.
 
+### Some robots are invisible to the detector, and the threshold is not why
+
+In a frame where a human can plainly see them, robots in the lower-right region are not detected.
+Lowering `score_threshold` from 0.35 all the way to **0.05** returns exactly the same five boxes,
+so they are not low-confidence detections being filtered -- the model produces nothing there.
+
+That rules out the cheap fix and points at two real ones. Either the viewpoint is missing from
+the training data, or -- more likely, and much cheaper to test -- the robots are simply too small
+once a 1920x1080 frame has been letterboxed into a 960x960 input. Running the detector a second
+time on a crop of the region would give them four times the pixels without retraining anything.
+
+The lesson is the one this project keeps relearning: measure which explanation is true before
+fixing either. Half an hour of measurement ruled out the fix that would have been tried first.
+
 ### Tracks are shorter now, and that is the honest number
 
 Same detections, different partitioning: 7 tracks became 34, median duration 166s became 8s. The
@@ -172,7 +186,9 @@ forever, and nobody checks a number that looks reasonable.
 | 2.3 | **Accuracy check against TBA** | Justin | We have TBA working and scores available. Compare our extracted events to the real final score; that number is the honest measure of whether any of this works. |
 | 2.4 | **More matches, `robot-v2`** | everyone | ~~Same loop as phase 1, into a **new** output folder.~~ **Done 2026-09-04:** 150 epochs on the AMD GPU via WSL2+ROCm, recall 0.819 to 0.864 on the same human-labelled split. |
 | 2.5 | **Region of interest per video source** | Justin | Some venues put a second view of the same field in one frame, and every robot in it is counted twice. Same shape of config as 2.1's OCR crop, and worth doing at the same time. |
-| 2.6 | **Detector threshold on real footage** | anyone | `score_threshold` is 0.35 and `nms_iou` 0.50 by inheritance, not measurement. Now that a real match runs end to end, both can be tuned against one. |
+| 2.6 | ~~**Detector threshold on real footage**~~ | anyone | **Measured, and it is not the threshold.** Robots visible in the lower-right of a real frame are missed at 0.35 and still missed at **0.05** -- the model does not see them at all. See below. |
+| 2.7 | **Tiled inference for the small-robot case** | Justin | The likely fix for 2.6. A 1920x1080 frame letterboxed into 960x960 halves everything; running the detector again on a crop of the region gives those robots four times the pixels. Standard for small-object detection and needs no retraining. |
+| 2.8 | **Bumper OCR accuracy** | Justin | 8 of 34 tracks attributed on the first real match. The scoreboard roster is solid (6/6 teams, 7/7 frames); the weak link is the digit read. Worth measuring against a hand-labelled match before tuning further. |
 
 ## Phase 3 — Operations
 
