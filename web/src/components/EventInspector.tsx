@@ -53,10 +53,19 @@ export function EventInspector(props: EventInspectorProps) {
   const [onlyCorrected, setOnlyCorrected] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const allTeams = useMemo(
-    () => [...(job.alliances?.red ?? []), ...(job.alliances?.blue ?? [])],
-    [job.alliances]
-  );
+  // Suggestions, not a whitelist. TBA has no data for plenty of matches -- the first real match
+  // analysed had alliances: null -- and when this list came only from there the dropdown was
+  // empty, so nobody could attribute anything at all. Bumper OCR reads the roster off the
+  // scoreboard in that case, so the teams it found are on the tracks even when TBA knew nothing.
+  const allTeams = useMemo(() => {
+    const seen = new Set<number>([
+      ...(job.alliances?.red ?? []),
+      ...(job.alliances?.blue ?? []),
+    ]);
+    tracks.forEach((t) => t.team != null && seen.add(t.team));
+    events.forEach((e) => e.team != null && seen.add(e.team));
+    return [...seen].sort((a, b) => a - b);
+  }, [job.alliances, tracks, events]);
 
   const shown = useMemo(
     () =>
@@ -455,6 +464,19 @@ function TrackPanel({
   );
   if (ordered.length === 0) return null;
 
+  // Blur fires on every focus change, so send only an actual change -- otherwise simply tabbing
+  // through the list would file a correction per track and bury the real ones.
+  const commitTeam = (track: Track, raw: string) => {
+    const trimmed = raw.trim();
+    if (trimmed === '') {
+      if (track.team != null) onPatchTrack(track.trackId, null);
+      return;
+    }
+    const team = Number(trimmed);
+    if (!Number.isInteger(team) || team <= 0 || team === track.team) return;
+    onPatchTrack(track.trackId, team);
+  };
+
   return (
     <details className="track-panel" open>
       <summary>
@@ -480,18 +502,29 @@ function TrackPanel({
                   {t.gaps.length} gap{t.gaps.length === 1 ? '' : 's'}
                 </span>
               )}
-              <select
+              {/* A list of suggestions with free entry, not a closed dropdown. The roster can
+                  be wrong or incomplete -- OCR misreads, TBA has no data, a team plays under a
+                  number nothing on screen showed -- and a human who can see the robot must never
+                  be unable to say which one it is. The backend accepts any team number. */}
+              <input
+                type="number"
+                min={1}
+                step={1}
+                list={`teams-${t.trackId}`}
+                className="team-entry"
+                placeholder="team"
                 disabled={busy}
-                value={t.team ?? ''}
-                onChange={(e) =>
-                  onPatchTrack(t.trackId, e.target.value ? Number(e.target.value) : null)
-                }
-              >
-                <option value="">unattributed</option>
+                defaultValue={t.team ?? ''}
+                onBlur={(e) => commitTeam(t, e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                }}
+              />
+              <datalist id={`teams-${t.trackId}`}>
                 {teams.map((n) => (
-                  <option key={n} value={n}>{n}</option>
+                  <option key={n} value={n} />
                 ))}
-              </select>
+              </datalist>
             </div>
           );
         })}

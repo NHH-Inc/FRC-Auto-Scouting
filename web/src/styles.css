@@ -428,5 +428,7 @@ td.warn { color: var(--amber); }
 .track-rows { display: grid; gap: 5px; margin-top: 8px; }
 .track-row { display: flex; align-items: center; gap: 7px; font-size: 12px; }
 .track-row.shaky { color: var(--amber); }
+/* Free entry, so a human can name a robot the roster never mentioned. */
+.track-row .team-entry { width: 72px; margin-left: auto; font: inherit; padding: 2px 5px; }
 .track-row .tconf { font-family: var(--mono); font-size: 11px; }
 .track-row select { width: auto; margin-left: auto; font-size: 12px; padding: 3px 6px; }
