@@ -244,8 +244,8 @@ forever, and nobody checks a number that looks reasonable.
 
 | # | Task | Owner | Why it matters |
 |---|---|---|---|
-| 2.1 | **Scoreboard OCR** | Robert | Gives a trustworthy match start time. Independent of bumper OCR, so it can land first. The crop region must be per-video-source config — never hardcoded. |
-| 2.2 | **Bumper OCR / team ID** | Robert | Turns "a robot" into "team 254". This is what makes the data *scouting* data rather than object detection. |
+| 2.1 | **Scoreboard OCR** | Robert | **Half done.** `ingest/scoreboard.py` reads the *roster* — 6/6 teams and both alliances on 7/7 sampled frames, with no per-venue crop: the bar is found by looking for saturated red touching saturated blue, and team numbers are the digits that do not change while the score and timer do. The **match start time** from the timer is still open, and is the half this row was originally about. |
+| 2.2 | ~~**Bumper OCR / team ID**~~ | Robert | **Done 2026-09-04.** `ingest/team_id.py`: roster narrows to six, bumper colour to three, and a hundred observations per track vote. 11 of 45 tracks on the real match, no red team ever attributed to a blue robot. Accuracy is 2.8. |
 | 2.3 | **Accuracy check against TBA** | Justin | Blocked twice over: TBA has no data for the 2026 matches collected, and there are no scoring events to compare. |
 | 2.12 | **Finish one camera's calibration** | Justin | `ingest.collection.calibrate` auto-detects tags and refuses when they cannot define a plane, which is the case on the İstanbul angle -- all four coplanar tags fall within 0.1px of one image row. It writes a gridded reference frame and a template; four hand-read field corners finish it. |
 | 2.11 | **Action extraction** | **everyone — this is the gap** | The pipeline runs end to end and exports zero rows, because the analyzer emits only `match_start` and `match_end`. Until a shot, a pickup or a cycle becomes an event, there is no scouting data at the end of any of this. |
