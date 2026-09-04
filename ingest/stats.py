@@ -134,8 +134,15 @@ def team_stats(
     )
     intervals = [shot_times[i] - shot_times[i - 1] for i in range(1, len(shot_times))]
 
-    attempts = sum(1 for e in mine if e.get("event_type") == "shot_attempt")
+    logged_attempts = sum(1 for e in mine if e.get("event_type") == "shot_attempt")
     made = sum(1 for e in mine if e.get("event_type") == "shot_made")
+    # A robot cannot score more shots than it took. The two are separate events -- the golden
+    # fixture has 80 attempts and 55 makes, none sharing a timestamp -- so a scout logging under
+    # time pressure can easily record the makes and miss the attempts. Believing that literally
+    # reports "1 made of 0 attempted, accuracy unknown", which reads as a broken tool rather than
+    # as missing input. Taking the larger of the two is a floor on what was attempted, and it can
+    # never push accuracy above 1.
+    attempts = max(logged_attempts, made)
 
     return {
         "team": team,
