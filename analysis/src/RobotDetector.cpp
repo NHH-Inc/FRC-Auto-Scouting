@@ -108,6 +108,11 @@ DetectorConfig load_detector_config() {
     config.background_class_id = optional_value<int>(value, "background_class_id", config.background_class_id);
     config.score_threshold = optional_value<double>(value, "score_threshold", config.score_threshold);
     config.nms_iou = optional_value<double>(value, "nms_iou", config.nms_iou);
+    config.tile_size = optional_value<int>(value, "tile_size", config.tile_size);
+    config.tile_overlap = optional_value<double>(value, "tile_overlap", config.tile_overlap);
+    if (config.tile_size < 0 || config.tile_overlap < 0.0 || config.tile_overlap >= 1.0) {
+        throw std::runtime_error("tile_size must be >= 0 and tile_overlap in [0, 1)");
+    }
     config.sample_rate_hz = optional_value<double>(value, "sample_rate_hz", config.sample_rate_hz);
     config.shot_change_threshold = optional_value<double>(value, "shot_change_threshold", config.shot_change_threshold);
     if (config.input_width <= 0 || config.input_height <= 0 || config.sample_rate_hz <= 0.0 ||
@@ -194,6 +199,43 @@ std::vector<Detection> non_max_suppression(std::vector<Detection> boxes, double 
         if (!duplicate) kept.push_back(candidate);
     }
     return kept;
+}
+
+std::vector<int> tile_origins(int total, int tile, double overlap) {
+    std::vector<int> starts;
+    if (tile <= 0 || total <= 0) return starts;
+    if (total <= tile) {
+        starts.push_back(0);
+        return starts;
+    }
+    const int step = std::max(1, static_cast<int>(tile * (1.0 - overlap)));
+    for (int start = 0; start + tile <= total; start += step) starts.push_back(start);
+    // Always finish flush with the far edge, or the last strip of the frame is never looked at.
+    if (starts.empty() || starts.back() != total - tile) starts.push_back(total - tile);
+    return starts;
+}
+
+Detection map_from_tile(const Detection& detection, int tile_x, int tile_y, int tile_w, int tile_h,
+                        int frame_w, int frame_h) {
+    Detection out = detection;
+    if (frame_w <= 0 || frame_h <= 0) return out;
+    out.x = (detection.x * tile_w + tile_x) / frame_w;
+    out.y = (detection.y * tile_h + tile_y) / frame_h;
+    out.w = detection.w * tile_w / frame_w;
+    out.h = detection.h * tile_h / frame_h;
+    return out;
+}
+
+bool clipped_by_tile(const Detection& detection, int tile_x, int tile_y, int tile_w, int tile_h,
+                     int frame_w, int frame_h) {
+    // A box within a couple of pixels of the edge is treated as touching it.
+    const double margin_x = tile_w > 0 ? 2.0 / tile_w : 0.0;
+    const double margin_y = tile_h > 0 ? 2.0 / tile_h : 0.0;
+    const bool at_left = detection.x <= margin_x && tile_x > 0;
+    const bool at_top = detection.y <= margin_y && tile_y > 0;
+    const bool at_right = detection.x + detection.w >= 1.0 - margin_x && tile_x + tile_w < frame_w;
+    const bool at_bottom = detection.y + detection.h >= 1.0 - margin_y && tile_y + tile_h < frame_h;
+    return at_left || at_top || at_right || at_bottom;
 }
 
 // --- the session -------------------------------------------------------------------------------
@@ -288,7 +330,36 @@ bool RobotDetector::enabled() const { return impl_ != nullptr; }
 const DetectorConfig& RobotDetector::config() const { return config_; }
 
 std::vector<Detection> RobotDetector::infer(const cv::Mat& bgr_frame) const {
-    if (!enabled()) return {};
+    if (!enabled() || bgr_frame.empty()) return {};
+    auto detections = infer_once(bgr_frame);
+
+    // A second look at native resolution. The whole-frame pass shrinks a 1920-wide frame to fit a
+    // 960 input, so a distant robot arrives at half its pixels; on a real match this recovered
+    // roughly half as many robots again. It is deliberately additive -- the whole-frame pass is
+    // still the one that sees a robot spanning a seam.
+    const int tile = config_.tile_size;
+    if (tile > 0 && (bgr_frame.cols > tile || bgr_frame.rows > tile)) {
+        for (const int tile_y : tile_origins(bgr_frame.rows, tile, config_.tile_overlap)) {
+            for (const int tile_x : tile_origins(bgr_frame.cols, tile, config_.tile_overlap)) {
+                const int tile_w = std::min(tile, bgr_frame.cols - tile_x);
+                const int tile_h = std::min(tile, bgr_frame.rows - tile_y);
+                const cv::Mat crop = bgr_frame(cv::Rect(tile_x, tile_y, tile_w, tile_h));
+                for (const auto& found : infer_once(crop)) {
+                    if (clipped_by_tile(found, tile_x, tile_y, tile_w, tile_h,
+                                        bgr_frame.cols, bgr_frame.rows)) {
+                        continue;
+                    }
+                    detections.push_back(map_from_tile(found, tile_x, tile_y, tile_w, tile_h,
+                                                       bgr_frame.cols, bgr_frame.rows));
+                }
+            }
+        }
+        detections = non_max_suppression(std::move(detections), config_.nms_iou);
+    }
+    return detections;
+}
+
+std::vector<Detection> RobotDetector::infer_once(const cv::Mat& bgr_frame) const {
 #ifndef FRC_HAVE_ONNXRUNTIME
     (void)bgr_frame;
     return {};

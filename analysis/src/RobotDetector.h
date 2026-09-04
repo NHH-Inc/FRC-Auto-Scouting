@@ -52,6 +52,14 @@ struct DetectorConfig {
     //: per anchor, so one robot arrives as a cluster; without suppression every count downstream
     //: is inflated. RF-DETR needs none -- its queries are already one-per-object.
     double nms_iou = 0.50;
+    //: Side of the square crops the frame is additionally sliced into, in source pixels; 0 is
+    //: off. A 1920x1080 frame letterboxed into a 960x960 input halves everything, and a robot
+    //: far from the camera falls below what the model resolves. Running it again on native-
+    //: resolution crops recovered about half as many robots again on a real match.
+    int tile_size = 0;
+    //: How much neighbouring tiles share. Without overlap a robot on a seam is cut in two and
+    //: recognised as neither half.
+    double tile_overlap = 0.25;
     double sample_rate_hz = 2.0;
     double shot_change_threshold = 0.55;
 };
@@ -84,6 +92,24 @@ std::vector<Detection> decode_yolo(const float* data, int64_t dim1, int64_t dim2
 /** Greedy suppression: keep the most confident box, drop what overlaps it, repeat. */
 std::vector<Detection> non_max_suppression(std::vector<Detection> boxes, double iou_threshold);
 
+/** Where each tile starts along one axis, always including a final tile flush with the end. */
+std::vector<int> tile_origins(int total, int tile, double overlap);
+
+/** A tile-relative normalized box, expressed relative to the whole frame. */
+Detection map_from_tile(const Detection& detection, int tile_x, int tile_y, int tile_w, int tile_h,
+                        int frame_w, int frame_h);
+
+/**
+ * Whether a box runs into a tile edge that is not also a frame edge.
+ *
+ * A robot straddling a seam is cut, and the model happily labels the visible sliver as a whole
+ * robot with modest confidence. Suppression does not remove it -- a sliver barely overlaps the
+ * real box -- so it survives as a phantom robot beside a real one. The overlapping neighbour
+ * tile sees the same robot whole, so dropping the cut copy loses nothing.
+ */
+bool clipped_by_tile(const Detection& detection, int tile_x, int tile_y, int tile_w, int tile_h,
+                     int frame_w, int frame_h);
+
 /** Runs a trained ONNX detector when a local model is configured. */
 class RobotDetector {
   public:
@@ -99,6 +125,9 @@ class RobotDetector {
     [[nodiscard]] std::vector<Detection> infer(const cv::Mat& bgr_frame) const;
 
   private:
+    /** One pass over one image. `infer` calls this for the whole frame and again per tile. */
+    [[nodiscard]] std::vector<Detection> infer_once(const cv::Mat& bgr_frame) const;
+
     struct Impl;
     DetectorConfig config_;
     std::unique_ptr<Impl> impl_;

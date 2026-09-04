@@ -152,19 +152,35 @@ The analyzer has no notion of a region of interest. It needs one, per video sour
 2.1 already says the OCR crop must be. Until then, per-team counts from footage like this are
 inflated and nothing in the output says so.
 
-### Some robots are invisible to the detector, and the threshold is not why
+### Some robots are invisible to the detector, and it is the viewpoint
 
 In a frame where a human can plainly see them, robots in the lower-right region are not detected.
-Lowering `score_threshold` from 0.35 all the way to **0.05** returns exactly the same five boxes,
-so they are not low-confidence detections being filtered -- the model produces nothing there.
+Three explanations were tested in order, and the first two were wrong:
 
-That rules out the cheap fix and points at two real ones. Either the viewpoint is missing from
-the training data, or -- more likely, and much cheaper to test -- the robots are simply too small
-once a 1920x1080 frame has been letterboxed into a 960x960 input. Running the detector a second
-time on a crop of the region would give them four times the pixels without retraining anything.
+1. **Not the threshold.** Lowering `score_threshold` from 0.35 to **0.05** returns exactly the
+   same five boxes. They are not low-confidence detections being filtered out.
+2. **Not the resolution.** Tiling at native resolution found nothing there either. Nor did feeding
+   the model that region alone at 2x and 3x magnification -- **zero boxes at 0.05**, while a
+   control crop of the main field returned three.
+3. **The viewpoint.** That region is a second field shot from almost directly overhead: robots
+   seen top-down, dark against a blue floor, among hundreds of yellow balls. Every image the
+   detector has ever trained on is a broadcast three-quarter view. It is not failing to resolve
+   these robots, it is failing to recognise them as robots.
 
-The lesson is the one this project keeps relearning: measure which explanation is true before
-fixing either. Half an hour of measurement ruled out the fix that would have been tried first.
+So the fix is training data from that viewpoint, and it needs **human** labels -- the machine
+labelling loop cannot propose what the detector cannot see. Logged as 2.9.
+
+Tiling was built anyway, because measuring it turned up a different benefit: it does not touch
+the overhead view but it finds robots the whole-frame pass misses elsewhere, and that is worth
+4.8x the inference time. It also needed one non-obvious guard. Tile seams fell at x=960, and a
+robot straddling one came back as a 0.26-confidence sliver beside the real box -- suppression
+cannot remove that, because a sliver barely overlaps anything. Detections touching a tile edge
+that is not also a frame edge are dropped; the overlapping neighbour tile sees the same robot
+whole.
+
+The lesson the project keeps relearning: measure which explanation is true before fixing any of
+them. An afternoon of measurement killed two plausible fixes that would both have been built
+first.
 
 ### Tracks are shorter now, and that is the honest number
 
@@ -187,7 +203,8 @@ forever, and nobody checks a number that looks reasonable.
 | 2.4 | **More matches, `robot-v2`** | everyone | ~~Same loop as phase 1, into a **new** output folder.~~ **Done 2026-09-04:** 150 epochs on the AMD GPU via WSL2+ROCm, recall 0.819 to 0.864 on the same human-labelled split. |
 | 2.5 | **Region of interest per video source** | Justin | Some venues put a second view of the same field in one frame, and every robot in it is counted twice. Same shape of config as 2.1's OCR crop, and worth doing at the same time. |
 | 2.6 | ~~**Detector threshold on real footage**~~ | anyone | **Measured, and it is not the threshold.** Robots visible in the lower-right of a real frame are missed at 0.35 and still missed at **0.05** -- the model does not see them at all. See below. |
-| 2.7 | **Tiled inference for the small-robot case** | Justin | The likely fix for 2.6. A 1920x1080 frame letterboxed into 960x960 halves everything; running the detector again on a crop of the region gives those robots four times the pixels. Standard for small-object detection and needs no retraining. |
+| 2.7 | ~~**Tiled inference**~~ | Justin | **Done 2026-09-04**, and it does *not* fix 2.6 — that was the wrong hypothesis, see below. It is still worth having: median robots on screen went 4 to 5 of 6, boxes +29%, longest track 150s to 170s. Costs 4.8x the inference (35s to 167s a match). `tile_size` in the detector config; 0 disables. |
+| 2.9 | **Label the overhead viewpoint** | everyone | The actual fix for 2.6, and it needs human labels because the detector cannot propose what it cannot see. A few hundred boxes on second-field frames, then retrain. |
 | 2.8 | **Bumper OCR accuracy** | Justin | 8 of 34 tracks attributed on the first real match. The scoreboard roster is solid (6/6 teams, 7/7 frames); the weak link is the digit read. Worth measuring against a hand-labelled match before tuning further. |
 
 ## Phase 3 — Operations

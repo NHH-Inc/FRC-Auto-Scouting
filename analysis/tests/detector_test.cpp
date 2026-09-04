@@ -20,9 +20,12 @@
 
 using frc::vision::Detection;
 using frc::vision::Letterbox;
+using frc::vision::clipped_by_tile;
 using frc::vision::decode_yolo;
 using frc::vision::letterbox_for;
+using frc::vision::map_from_tile;
 using frc::vision::non_max_suppression;
+using frc::vision::tile_origins;
 
 namespace {
 
@@ -219,6 +222,91 @@ void frame_edges() {
           "a box entirely outside the frame is dropped rather than flattened onto the edge");
 }
 
+// --- Slicing the frame ---------------------------------------------------------------------------
+// A 1920x1080 frame letterboxed into a 960x960 input arrives at half scale, and a robot far from
+// the camera falls below what the model resolves. Running it again on native-resolution crops
+// recovered about half as many robots again on a real match -- 35 detections became 55.
+void tiling_geometry() {
+    std::printf("tiles across a 1920x1080 frame\n");
+    const auto across = tile_origins(1920, 960, 0.25);
+    check(across.size() == 3, "1920 needs three 960 tiles at 25% overlap (" +
+                                  std::to_string(across.size()) + ")");
+    check(!across.empty() && across.front() == 0, "the first tile starts at the edge");
+    check(!across.empty() && across.back() == 960,
+          "the last tile ends flush with the frame, so no strip is never looked at");
+
+    const auto down = tile_origins(1080, 960, 0.25);
+    check(down.size() == 2 && down.back() == 120, "1080 needs two rows, the second flush at 120");
+
+    check(tile_origins(800, 960, 0.25).size() == 1,
+          "a frame smaller than a tile is one tile, not zero");
+    check(tile_origins(1920, 0, 0.25).empty(), "a zero tile size produces no tiles");
+
+    // Every column of the frame must fall inside some tile, or robots there are invisible.
+    bool covered = true;
+    for (int x = 0; x < 1920; ++x) {
+        bool inside = false;
+        for (const int start : across) inside = inside || (x >= start && x < start + 960);
+        covered = covered && inside;
+    }
+    check(covered, "every column of the frame is inside at least one tile");
+}
+
+void tile_coordinates() {
+    std::printf("mapping a tile box back to the frame\n");
+    // A box filling the middle of the second tile across (starting at 720) and second row (120).
+    Detection in;
+    in.x = 0.25; in.y = 0.50; in.w = 0.25; in.h = 0.25; in.confidence = 0.8;
+    const Detection out = map_from_tile(in, 720, 120, 960, 960, 1920, 1080);
+    check(near(out.x, (0.25 * 960 + 720) / 1920.0, 1e-9), "x lands where the tile puts it");
+    check(near(out.y, (0.50 * 960 + 120) / 1080.0, 1e-9), "y lands where the tile puts it");
+    check(near(out.w, 0.25 * 960 / 1920.0, 1e-9), "width shrinks by the tile's share of the frame");
+    check(near(out.h, 0.25 * 960 / 1080.0, 1e-9), "height shrinks by its own axis, not x's");
+    check(near(out.confidence, 0.8), "confidence is carried through unchanged");
+
+    // A tile that IS the frame must be a no-op, or single-tile frames would be distorted.
+    const Detection same = map_from_tile(in, 0, 0, 1920, 1080, 1920, 1080);
+    check(near(same.x, in.x) && near(same.y, in.y) && near(same.w, in.w) && near(same.h, in.h),
+          "a tile covering the whole frame changes nothing");
+}
+
+// The artifact that made this worth testing: on a real frame, tile seams fell at x=960 and a
+// robot straddling one came back as a 0.26-confidence sliver beside the real box. Suppression
+// cannot remove it -- a sliver barely overlaps anything -- so it had to be dropped at the source.
+void tile_seams() {
+    std::printf("a robot cut by a tile seam\n");
+    Detection at_right;
+    at_right.x = 0.90; at_right.y = 0.40; at_right.w = 0.10; at_right.h = 0.10;
+    check(clipped_by_tile(at_right, 0, 0, 960, 960, 1920, 1080),
+          "a box against an interior right edge is a cut robot");
+
+    Detection at_left;
+    at_left.x = 0.0; at_left.y = 0.40; at_left.w = 0.10; at_left.h = 0.10;
+    check(clipped_by_tile(at_left, 720, 0, 960, 960, 1920, 1080),
+          "a box against an interior left edge is a cut robot");
+
+    // The frame's own edges are different: a robot genuinely leaving shot is real, and dropping
+    // it would blind the tracker exactly where robots enter and exit.
+    check(!clipped_by_tile(at_left, 0, 0, 960, 960, 1920, 1080),
+          "the frame's own left edge is not a seam");
+    Detection at_frame_right;
+    at_frame_right.x = 0.90; at_frame_right.y = 0.40; at_frame_right.w = 0.10; at_frame_right.h = 0.10;
+    check(!clipped_by_tile(at_frame_right, 960, 0, 960, 960, 1920, 1080),
+          "the frame's own right edge is not a seam");
+
+    Detection middle;
+    middle.x = 0.40; middle.y = 0.40; middle.w = 0.10; middle.h = 0.10;
+    check(!clipped_by_tile(middle, 0, 0, 960, 960, 1920, 1080),
+          "a box well inside its tile is kept");
+
+    Detection at_bottom;
+    at_bottom.x = 0.40; at_bottom.y = 0.92; at_bottom.w = 0.10; at_bottom.h = 0.08;
+    check(clipped_by_tile(at_bottom, 0, 0, 960, 960, 1920, 1080),
+          "an interior bottom edge cuts too, not just the sides");
+    check(!clipped_by_tile(at_bottom, 0, 120, 960, 960, 1920, 1080),
+          "the same box is fine when that edge is the bottom of the frame");
+}
+
 }  // namespace
 
 int main() {
@@ -229,6 +317,9 @@ int main() {
     filtering();
     suppression();
     frame_edges();
+    tiling_geometry();
+    tile_coordinates();
+    tile_seams();
     std::printf("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }
