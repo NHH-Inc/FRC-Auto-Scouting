@@ -1,0 +1,139 @@
+{
+  "_comment": [
+    "Project Tengen's public community server: somewhere to show the project off, post updates,",
+    "take feedback, and give the people building it a private place to work.",
+    "",
+    "The shape follows from that. Everything a visitor sees first is read-only, so the top of the",
+    "server reads as information rather than chatter. Conversation is public and open. Development",
+    "is private, because half-finished decisions read badly to people who only see the conclusion.",
+    "Logs are private too -- bot output is noise to everyone except the person debugging it.",
+    "",
+    "Nothing here deletes. Anything already on the server is left alone."
+  ],
+
+  "roles": [
+    {
+      "name": "Maintainer",
+      "colour": "#e67e22",
+      "hoist": true,
+      "mentionable": true,
+      "permissions": ["manage_channels", "manage_messages", "manage_roles",
+                      "kick_members", "ban_members", "mention_everyone"]
+    },
+    {
+      "name": "Developer",
+      "colour": "#3498db",
+      "hoist": true,
+      "mentionable": true,
+      "permissions": ["manage_messages"]
+    },
+    {
+      "name": "Contributor",
+      "colour": "#2ecc71",
+      "hoist": true,
+      "mentionable": true,
+      "permissions": []
+    },
+    {
+      "name": "Tester",
+      "colour": "#9b59b6",
+      "hoist": false,
+      "mentionable": true,
+      "permissions": []
+    },
+    {
+      "name": "Bot",
+      "colour": "#95a5a6",
+      "hoist": true,
+      "mentionable": false,
+      "permissions": []
+    }
+  ],
+
+  "categories": [
+    {
+      "name": "START HERE",
+      "channels": [
+        { "name": "welcome", "type": "text",
+          "topic": "What Project Tengen is, and how to get started with it.",
+          "read_only_for": ["@everyone"] },
+        { "name": "rules", "type": "text",
+          "topic": "Server rules. Short, and actually enforced.",
+          "read_only_for": ["@everyone"] },
+        { "name": "announcements", "type": "text",
+          "topic": "Releases, milestones, and anything the whole server should see.",
+          "read_only_for": ["@everyone"] }
+      ]
+    },
+    {
+      "name": "THE PROJECT",
+      "channels": [
+        { "name": "github", "type": "text",
+          "topic": "Commits, pull requests and issues from the repository. Webhook feed.",
+          "read_only_for": ["@everyone"] },
+        { "name": "releases", "type": "text",
+          "topic": "Tagged versions and what changed in them.",
+          "read_only_for": ["@everyone"] },
+        { "name": "roadmap", "type": "text",
+          "topic": "What is being worked on and what is planned next.",
+          "read_only_for": ["@everyone"] },
+        { "name": "showcase", "type": "text",
+          "topic": "Tengen in action: clips, screenshots, scouting results." }
+      ]
+    },
+    {
+      "name": "COMMUNITY",
+      "channels": [
+        { "name": "general", "type": "text",
+          "topic": "General conversation about the project and FRC scouting." },
+        { "name": "support", "type": "text",
+          "topic": "Trouble running it? Ask here. Include what you ran and what happened." },
+        { "name": "suggestions", "type": "text",
+          "topic": "Feature ideas and requests. Not a guarantee anything gets built." },
+        { "name": "off-topic", "type": "text",
+          "topic": "Everything else." },
+        { "name": "community-voice", "type": "voice" }
+      ]
+    },
+    {
+      "name": "DEVELOPMENT",
+      "private_to": ["Maintainer", "Developer"],
+      "channels": [
+        { "name": "dev-general", "type": "text",
+          "topic": "Day-to-day development chat." },
+        { "name": "dev-planning", "type": "text",
+          "topic": "What to build, in what order, and why." },
+        { "name": "code-review", "type": "text",
+          "topic": "Pull requests worth a second pair of eyes." },
+        { "name": "model-training", "type": "text",
+          "topic": "Detector runs, datasets, metrics, and what actually improved." },
+        { "name": "dev-voice", "type": "voice" }
+      ]
+    },
+    {
+      "name": "TESTING",
+      "private_to": ["Maintainer", "Developer", "Tester"],
+      "channels": [
+        { "name": "test-builds", "type": "text",
+          "topic": "Pre-release builds to try, and what to look at in them." },
+        { "name": "bug-reports", "type": "text",
+          "topic": "Something broke. Steps to reproduce beat a description of the symptom." }
+      ]
+    },
+    {
+      "name": "LOGS",
+      "private_to": ["Maintainer"],
+      "channels": [
+        { "name": "ci-status", "type": "text",
+          "topic": "Build and test results. Noisy by design.",
+          "read_only_for": ["@everyone"] },
+        { "name": "bot-logs", "type": "text",
+          "topic": "Bot output and errors.",
+          "read_only_for": ["@everyone"] },
+        { "name": "mod-log", "type": "text",
+          "topic": "Moderation actions, kept for the record.",
+          "read_only_for": ["@everyone"] }
+      ]
+    }
+  ]
+}

@@ -171,7 +171,7 @@ async def sync(client: discord.Client, guild_id: int, config: dict, apply: bool)
             plan.add("create", f"category {cat_name}" + (" (private)" if private_to else ""))
             if apply:
                 category = await guild.create_category(
-                    cat_name, overwrites=overwrites or None,
+                    cat_name, overwrites=overwrites,
                     reason="Project Tengen server setup")
                 existing_categories[cat_name] = category
         else:
@@ -200,12 +200,12 @@ async def sync(client: discord.Client, guild_id: int, config: dict, apply: bool)
 
             if kind == "voice":
                 await guild.create_voice_channel(
-                    ch_name, category=category, overwrites=ch_overwrites or None,
+                    ch_name, category=category, overwrites=ch_overwrites,
                     reason="Project Tengen server setup")
             else:
                 await guild.create_text_channel(
                     ch_name, category=category, topic=ch_spec.get("topic"),
-                    overwrites=ch_overwrites or None,
+                    overwrites=ch_overwrites,
                     reason="Project Tengen server setup")
 
     for channel in guild.channels:
@@ -245,8 +245,24 @@ def main() -> int:
 
     @client.event
     async def on_ready():
+        # discord.py swallows exceptions raised inside event handlers, and log_handler=None
+        # silences its logger, so a failure part-way through an apply would otherwise vanish and
+        # look like the run simply stopping. Report it, loudly, and say what had already changed.
         try:
             status["code"] = await sync(client, args.guild, config, args.apply)
+        except discord.Forbidden as error:
+            print("")
+            print(f"  REFUSED by Discord: {error.text}")
+            print("  The bot lacks a permission it needs. Check its role has Administrator, and")
+            print("  that the bot's role sits ABOVE the roles and categories it is managing --")
+            print("  Discord ignores permissions from a role positioned below the target.")
+            status["code"] = 1
+        except Exception as error:
+            import traceback
+            print("")
+            print(f"  FAILED: {type(error).__name__}: {error}")
+            traceback.print_exc()
+            status["code"] = 1
         finally:
             await client.close()
 
