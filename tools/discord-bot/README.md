@@ -75,3 +75,31 @@ rebuilt from the config.
 
 **Order in the file is not order in Discord.** Discord sorts by its own position values; drag
 things where you want them once, and re-runs will not move them.
+
+## Webhooks and invites (done 2026-09-03)
+
+**GitHub → Discord** is live on `NHH-Inc/Project-Tengen`:
+
+| hook | events | channel |
+|---|---|---|
+| `674260503` | push, pull_request, issues, issue_comment, create, delete | `#github` |
+| `674260505` | release | `#releases` |
+
+Both point at a Discord webhook URL with `/github` appended — Discord parses GitHub's payload
+format natively at that path, so no relay service is involved.
+
+A Discord webhook URL is a credential: anyone holding it can post to that channel as anything.
+They are not in this repository and were never printed. To rotate one, delete the webhook in the
+channel's settings and re-register with `gh api repos/OWNER/REPO/hooks`.
+
+**Invites.** The server has exactly one, permanent, and `@everyone` can no longer create more —
+every member-generated link is another URL that can leak or outlive the person who made it. The
+link is displayed as a voice channel at the top of START HERE that nobody can connect to: its name
+*is* the link, so it sits in the sidebar and can be read and copied without being joinable.
+
+## Channels with history win
+
+The setup bot created `#general` and `#announcements` without knowing the server already had
+them, with messages in. The fix was to keep the originals, move them into the new categories, and
+delete the empty duplicates — never the other way round. Anything holding even one message is
+left alone.
