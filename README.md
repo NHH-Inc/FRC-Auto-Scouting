@@ -36,6 +36,7 @@ shared surface, and nothing in `/contracts/` changes without all three of us agr
 | **Know what to do next** | [docs/PLAN.md](docs/PLAN.md) |
 | **Just run it** | [docs/RUNNING.md](docs/RUNNING.md) |
 | **Understand or do model training** | [docs/TRAINING.md](docs/TRAINING.md) |
+| **Get frames labelled by people** | [docs/LABELLING.md](docs/LABELLING.md) |
 | **Host it / know where videos and data live** | [docs/HOSTING.md](docs/HOSTING.md) |
 | **Set up the one shared instance** | [docs/CENTRAL-SETUP.md](docs/CENTRAL-SETUP.md) |
 | **Know why something is the way it is** | [docs/DECISIONS.md](docs/DECISIONS.md) |
