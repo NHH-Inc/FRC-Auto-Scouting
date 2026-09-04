@@ -823,6 +823,27 @@ def export_to_sheets(payload: dict, db: Session = Depends(get_db)):
         per_match.append((match_id, events, stats_list))
 
     headers, rows = sheets.build_rows(mode, per_match)
+
+    if not rows:
+        # Writing nothing and returning 200 is the same failure this endpoint already refuses
+        # further down: a success that did not happen. It is also the exact shape of the first
+        # real end-to-end run, where 45 tracks and 11 team attributions produced zero rows
+        # because a row needs a team-attributed EVENT and the analyzer emits only match_start
+        # and match_end. Say which of those is missing rather than making the user guess.
+        total = sum(len(events) for _, events, _ in per_match)
+        attributed = sum(1 for _, events, _ in per_match for e in events
+                         if e.get("team") is not None)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Nothing to export: {total} events across those matches, {attributed} of them "
+                f"attributed to a team, so there are no rows. Action events (shots, cycles) are "
+                f"not extracted yet, and match_start/match_end belong to no team. Attributing a "
+                f"track in the web app moves its events onto a team; if a match has only "
+                f"match-level events, there is nothing to attribute."
+            ),
+        )
+
     exporter, transport = _active_exporter()
     result = exporter.export(mode, headers, rows)
 

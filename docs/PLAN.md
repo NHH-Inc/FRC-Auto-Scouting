@@ -152,6 +152,31 @@ The analyzer has no notion of a region of interest. It needs one, per video sour
 2.1 already says the OCR crop must be. Until then, per-team counts from footage like this are
 inflated and nothing in the output says so.
 
+### The whole chain now runs, and it delivers nothing
+
+A real match went the whole way on 2026-09-04: analyzer, database, API, the endpoints the web app
+calls, a human re-attribution, and the spreadsheet. Every step returned 200. Forty-five tracks and
+two events reached Postgres, eleven tracks carried a team, five of the six roster teams appeared,
+a track was re-attributed and `?raw=true` still returned the original.
+
+And the export wrote **zero rows**, because a spreadsheet row needs a team-attributed *event*, and
+the analyzer emits exactly two events per match: `match_start` and `match_end`. Neither belongs to
+a team. Per-team statistics come back all zeros for the same reason.
+
+So the plumbing is finished and the content is missing. **Action extraction -- shots, cycles,
+pickups -- is the gap between a working pipeline and scouting data**, and nothing downstream can
+paper over it. Tracks alone say where robots were; they do not say what they did.
+
+Two real bugs fell out of the run:
+
+  * **The database was unreachable and had never been written to.** `DATABASE_URL` pointed at the
+    Supabase pooler on port 5432, which is session mode and closed on these projects. It fails
+    with "server closed the connection unexpectedly", which reads like an outage rather than a
+    wrong port. 6543 works. Every table had zero rows, so nothing had ever run against it.
+  * **The export reported success while writing nothing.** 200 with `rows_written: 0`. That is
+    the same lie the endpoint already refuses when credentials are missing. It now returns 422
+    and names the cause.
+
 ### Recall on 2026 footage is the real problem, and it is not one venue
 
 Chasing the missed lower-right robots turned up something larger. Twelve venues sampled at random
@@ -221,7 +246,8 @@ forever, and nobody checks a number that looks reasonable.
 |---|---|---|---|
 | 2.1 | **Scoreboard OCR** | Robert | Gives a trustworthy match start time. Independent of bumper OCR, so it can land first. The crop region must be per-video-source config — never hardcoded. |
 | 2.2 | **Bumper OCR / team ID** | Robert | Turns "a robot" into "team 254". This is what makes the data *scouting* data rather than object detection. |
-| 2.3 | **Accuracy check against TBA** | Justin | We have TBA working and scores available. Compare our extracted events to the real final score; that number is the honest measure of whether any of this works. |
+| 2.3 | **Accuracy check against TBA** | Justin | Blocked twice over: TBA has no data for the 2026 matches collected, and there are no scoring events to compare. |
+| 2.11 | **Action extraction** | **everyone — this is the gap** | The pipeline runs end to end and exports zero rows, because the analyzer emits only `match_start` and `match_end`. Until a shot, a pickup or a cycle becomes an event, there is no scouting data at the end of any of this. |
 | 2.4 | **More matches, `robot-v2`** | everyone | ~~Same loop as phase 1, into a **new** output folder.~~ **Done 2026-09-04:** 150 epochs on the AMD GPU via WSL2+ROCm, recall 0.819 to 0.864 on the same human-labelled split. |
 | 2.5 | **Region of interest per video source** | Justin | Some venues put a second view of the same field in one frame, and every robot in it is counted twice. Same shape of config as 2.1's OCR crop, and worth doing at the same time. |
 | 2.6 | ~~**Detector threshold on real footage**~~ | anyone | **Measured, and it is not the threshold.** Robots visible in the lower-right of a real frame are missed at 0.35 and still missed at **0.05** -- the model does not see them at all. See below. |

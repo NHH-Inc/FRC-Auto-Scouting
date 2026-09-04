@@ -335,6 +335,17 @@ def main():
     r = client.post("/api/export/sheets", json={"match_ids": [], "mode": "aggregate"})
     check("export with no matches is rejected", r.status_code == 400)
 
+    # A match whose events belong to no team produces no rows. Reporting 200 for that is the
+    # same lie as reporting a write with no credentials -- and it is what the first real
+    # end-to-end run got: 45 tracks, 11 attributed, rows_written 0, status 200.
+    r = client.post("/api/export/sheets",
+                    json={"match_ids": [NO_TBA_MATCH], "mode": "aggregate"})
+    check("an export with no team-attributed events is rejected, not called a success",
+          r.status_code == 422, str(r.status_code))
+    # Errors leave this API as {error_code, error}, not FastAPI's raw {detail}.
+    check("and it says why", "attributed to a team" in r.json().get("error", ""),
+          str(r.json())[:120])
+
     print("\nSheets row building (pure, no API)")
     from ingest import sheets as sheets_mod
     from ingest import stats as stats_mod
