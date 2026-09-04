@@ -80,7 +80,7 @@ jobs:
           assert r["frames_total"] > 1, r
           assert r["frames_analyzed"] == 0, r
           assert r["tracks_emitted"] == 0, r
-          assert r["model_version"] == "rfdetr-unconfigured", r
+          assert r["model_version"] == "detector-unconfigured", r
           print("result.json ok")
           PY
 

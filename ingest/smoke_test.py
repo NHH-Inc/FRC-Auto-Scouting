@@ -27,6 +27,18 @@ _tmp = Path(tempfile.mkdtemp())
 os.environ["DATABASE_URL"] = f"sqlite:///{(_tmp / 'smoke.db').as_posix()}"
 os.environ["FRC_DATA_DIR"] = str(_tmp / "data")
 
+# Both exporters are built at import time from the environment, and load_dotenv runs with
+# override=False, so setting these empty here wins over ingest/.env.
+#
+# This is not tidiness. Once a real export is configured -- and one now is -- an unguarded run
+# of this file POSTS the fixture rows to the live spreadsheet, because the endpoint under test
+# really does export. A test suite must not write to the team's sheet, and the assertion below
+# is about the unconfigured path anyway, so the only correct environment for it is one with no
+# credentials at all.
+for _credential in ("SHEETS_SPREADSHEET_ID", "GOOGLE_APPLICATION_CREDENTIALS",
+                    "APPS_SCRIPT_URL", "APPS_SCRIPT_SECRET"):
+    os.environ[_credential] = ""
+
 from fastapi.testclient import TestClient  # noqa: E402
 
 from ingest import database, models  # noqa: E402

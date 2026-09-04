@@ -28,7 +28,7 @@
 #include "ContractModels.h"
 #include "Homography.h"
 #include "IoUTracker.h"
-#include "RFDetrDetector.h"
+#include "RobotDetector.h"
 
 namespace fs = std::filesystem;
 
@@ -198,7 +198,7 @@ int main(int argc, char* argv[]) {
         // coordinates null, which is the honest output rather than a guessed one.
         const auto homography = frc::vision::load_homography(
             season.field_length_ft, season.field_width_ft);
-        const frc::vision::RFDetrDetector detector(detector_config);
+        const frc::vision::RobotDetector detector(detector_config);
         const bool detector_enabled = detector.enabled();
 
         print_progress(0.05, frc::stage::kDecoding);
@@ -268,7 +268,7 @@ int main(int argc, char* argv[]) {
 
         frc::RunResult result;
         result.job_id = job.job_id;
-        result.model_version = detector_enabled ? detector_config.model_version : "rfdetr-unconfigured";
+        result.model_version = detector_enabled ? detector_config.model_version : "detector-unconfigured";
         result.box_sample_rate = box_sample_rate;
         result.homography_ok = homography.has_value();
         result.frames_total = decoded_frames;

@@ -39,6 +39,38 @@ frc::Box as_box(double t, const Detection& detection) {
  */
 constexpr double kMaxCentreSpeed = 1.0;
 
+/**
+ * The furthest a centre may move across a gap and still be believed to be the same robot.
+ *
+ * The speed gate above is a rate, so it grows without limit as a gap lengthens: over a thirteen
+ * second occlusion it permits thirteen frame widths, which is the whole frame several times over
+ * and therefore no constraint at all. The first real end-to-end run showed exactly that -- every
+ * one of seven tracks jumped between 0.4 and 0.7 frame widths across gaps of four to thirteen
+ * seconds, silently trading one robot's identity for another's.
+ *
+ * A rate needs a ceiling. Six robots on a field look alike, so past a few robot-widths of
+ * displacement "it is the nearest one" stops being evidence and starts being a guess.
+ */
+constexpr double kMaxBridgeDistance = 0.30;
+
+/**
+ * How long a track may go unseen before it ends.
+ *
+ * This is the same argument the shot_change rule already makes. A cut is not bridged because
+ * across it a robot could be anywhere; after several seconds of occlusion the same is true, and
+ * the tracker has no more reason to claim continuity than it does across a cut. Ending the track
+ * and starting a new one says what is actually known: two stretches of observation that may or
+ * may not be the same robot. Claiming one identity across the gap would be inventing the part
+ * nobody saw.
+ *
+ * Deliberately generous, because the distance ceiling above is what actually discriminates. Of
+ * the twelve long gaps the first real run bridged, nine moved 0.25 to 0.70 frame widths and three
+ * moved under 0.07; distance alone separates them exactly. This only has to stop a track waiting
+ * indefinitely for something to wander into range. At the 2 Hz the analyzer samples at, it is
+ * twelve missed samples.
+ */
+constexpr double kMaxGapSeconds = 6.0;
+
 /** Centre-to-centre distance between a predicted box and a detection. */
 double centre_distance(const frc::Box& a, const Detection& b) {
     const double dx = (a.x + a.w / 2.0) - (b.x + b.w / 2.0);
@@ -96,7 +128,24 @@ void IoUTracker::close_gap(State& state, double end) {
     state.open_gap.reset();
 }
 
+void IoUTracker::retire_stale(double t_seconds) {
+    std::vector<State> surviving;
+    surviving.reserve(states_.size());
+    for (auto& state : states_) {
+        if (t_seconds - state.last_seen <= kMaxGapSeconds) {
+            surviving.push_back(std::move(state));
+            continue;
+        }
+        // The track ends at its last real observation. The interval after that belongs to no
+        // track, rather than being written as a gap inside one.
+        state.open_gap.reset();
+        if (!state.track.boxes.empty()) retired_.push_back(std::move(state.track));
+    }
+    states_ = std::move(surviving);
+}
+
 void IoUTracker::update(double t_seconds, const std::vector<Detection>& detections, bool camera_cut) {
+    retire_stale(t_seconds);
     if (camera_cut) {
         for (auto& state : states_) open_gap(state, t_seconds, frc::gap_reason::kShotChange);
         return;
@@ -113,7 +162,7 @@ void IoUTracker::update(double t_seconds, const std::vector<Detection>& detectio
     for (size_t s = 0; s < states_.size(); ++s) {
         const frc::Box expected = predict(states_[s], t_seconds);
         const double dt = std::max(1e-6, t_seconds - states_[s].last_box.t);
-        const double reach = kMaxCentreSpeed * dt;
+        const double reach = std::min(kMaxCentreSpeed * dt, kMaxBridgeDistance);
         for (size_t d = 0; d < detections.size(); ++d) {
             const double overlap = iou(expected, detections[d]);
             if (overlap >= minimum_iou_) {
@@ -162,7 +211,7 @@ void IoUTracker::update(double t_seconds, const std::vector<Detection>& detectio
     for (size_t index = 0; index < detections.size(); ++index) {
         if (detection_used[index]) continue;
         State state;
-        state.track.track_id = static_cast<int>(states_.size());
+        state.track.track_id = next_track_id_++;
         state.last_box = as_box(t_seconds, detections[index]);
         state.track.boxes.push_back(state.last_box);
         state.recent.push_back(state.last_box);
@@ -173,11 +222,16 @@ void IoUTracker::update(double t_seconds, const std::vector<Detection>& detectio
 
 void IoUTracker::finish(double t_seconds) {
     output_.clear();
-    output_.reserve(states_.size());
+    output_.reserve(states_.size() + retired_.size());
+    for (auto& track : retired_) output_.push_back(std::move(track));
+    retired_.clear();
     for (auto& state : states_) {
         close_gap(state, t_seconds);
         if (!state.track.boxes.empty()) output_.push_back(std::move(state.track));
     }
+    // Retired tracks are appended as they end, so order by id to keep output deterministic.
+    std::sort(output_.begin(), output_.end(),
+              [](const frc::Track& a, const frc::Track& b) { return a.track_id < b.track_id; });
 }
 
 const std::vector<frc::Track>& IoUTracker::tracks() const { return output_; }

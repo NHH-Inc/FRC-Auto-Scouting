@@ -1,17 +1,32 @@
 # The plan
 
-Last updated 2026-09-02.
+Last updated 2026-09-04.
 
 ## You are here
 
-The detection pipeline works end to end and produces its own next-generation training data. YOLO
-is the detector; time is the second opinion.
+**The pipeline has run end to end on a real match, with a person reading the output.** That had
+never happened before 2026-09-04, and it immediately found two things no unit test could.
+
+The analyzer could only load RF-DETR. Both trained models are YOLO -- one output instead of two,
+`/255` instead of ImageNet statistics, letterboxed instead of stretched, and thousands of
+overlapping candidates needing suppression. So every real run analysed **zero frames of every
+frame it decoded** and wrote that plainly in `result.json`, where nobody looked. Each component
+was tested; the seam between two of them was not.
+
+The tracker then bridged gaps of four to thirteen seconds, because its speed gate was a rate with
+no ceiling: across thirteen seconds it permitted thirteen frame widths, which is no constraint at
+all. All seven tracks in the match jumped between 0.4 and 0.7 frame widths mid-track -- one
+robot's identity handed to another, which for a scouting system means one team's actions credited
+to a different team.
+
+Both are fixed, and the fixes are pinned by tests that fail without them. YOLO is the detector;
+time is the second opinion.
 
 ```
-[1] analysis  C++   ██████████  builds, runs on real broadcast, homography wired in
-[2] ingest    Py    ██████████  153 tests, 71 contract checks green
+[1] analysis  C++   ██████████  runs YOLO on real broadcast, tracks, homography wired in
+[2] ingest    Py    ██████████  174 tests, 71 contract checks green
 [3] web       TS    ██████████  player, overlay, corrections, Sheets export
-    detection Py    ██████████  YOLO trained, labels our footage, corroborated by time
+    detection Py    ██████████  v2 trained on the AMD GPU; C++ agrees box-for-box
     DATA          ██████████  2,429 human labels + 50 matches densely auto-labelled
 ```
 
@@ -78,7 +93,7 @@ Not our own guesses, in the end. Two CC BY 4.0 datasets from Roboflow Universe m
 single `robot` class: **2,429 human-labelled images**, 5,815 boxes, at
 `data/datasets/frc-robots-merged/`. Their splits leaked and were rebuilt; see the notes above.
 
-### 1.4 — Train a labeller · **Robert** · IN PROGRESS
+### 1.4 — Train a labeller · **Robert, then Justin** · DONE
 
 ```powershell
 yolo detect train data=<path>/frc-robots-merged/data.yaml model=yolo11s.pt epochs=100 imgsz=640
@@ -112,21 +127,52 @@ good model — and we already know both source datasets leaked before we rebuilt
 
 **Done when:** boxes track robots through a real match and gap at broadcast cuts.
 
-**When 1.6 passes, the project works end to end for the first time.** Everything after this is
-improvement rather than construction.
+**1.6 passed on 2026-09-04**, on `2026tuis_qm29` with `robot-v2`: 423 frames analysed, boxes on
+robots, 34 tracks, gaps at cuts. The C++ detector was checked against `detect_runner.py` on real
+frames first -- 29 of 29 boxes matching at IoU 1.000 -- because two implementations of the same
+arithmetic agreeing is the only cheap way to know the port is right.
+
+Everything after this is improvement rather than construction.
+
+---
+
+## What the first end-to-end run turned up
+
+Neither of these is a bug. They are things only a real match could have told us.
+
+### The lower half of a frame can be a second view of the same field
+
+`2026tuis_qm29` is shot from a balcony: above the handrail is the field, below it is another view
+of the same match. The detector is right to fire in both -- they are robots -- but a robot seen
+twice is counted twice, and **every one of the seven original tracks had boxes on both sides**,
+so tracks were switching between two views of the same field. 323 of 1,423 boxes were in the
+lower region.
+
+The analyzer has no notion of a region of interest. It needs one, per video source, exactly as
+2.1 already says the OCR crop must be. Until then, per-team counts from footage like this are
+inflated and nothing in the output says so.
+
+### Tracks are shorter now, and that is the honest number
+
+Same detections, different partitioning: 7 tracks became 34, median duration 166s became 8s. The
+7 were not better -- they were one long fabricated identity each. A fragmented track is something
+a human fixes in the correction UI, which is what it is for. A wrong identity is silently wrong
+forever, and nobody checks a number that looks reasonable.
 
 ---
 
 ## Phase 2 — Make the output trustworthy
 
-Only start these once 1.6 passes.
+1.6 has passed, so these are live.
 
 | # | Task | Owner | Why it matters |
 |---|---|---|---|
 | 2.1 | **Scoreboard OCR** | Robert | Gives a trustworthy match start time. Independent of bumper OCR, so it can land first. The crop region must be per-video-source config — never hardcoded. |
 | 2.2 | **Bumper OCR / team ID** | Robert | Turns "a robot" into "team 254". This is what makes the data *scouting* data rather than object detection. |
 | 2.3 | **Accuracy check against TBA** | Justin | We have TBA working and scores available. Compare our extracted events to the real final score; that number is the honest measure of whether any of this works. |
-| 2.4 | **More matches, `robot-v2`** | everyone | Same loop as phase 1, into a **new** output folder. Never overwrite v1. |
+| 2.4 | **More matches, `robot-v2`** | everyone | ~~Same loop as phase 1, into a **new** output folder.~~ **Done 2026-09-04:** 150 epochs on the AMD GPU via WSL2+ROCm, recall 0.819 to 0.864 on the same human-labelled split. |
+| 2.5 | **Region of interest per video source** | Justin | Some venues put a second view of the same field in one frame, and every robot in it is counted twice. Same shape of config as 2.1's OCR crop, and worth doing at the same time. |
+| 2.6 | **Detector threshold on real footage** | anyone | `score_threshold` is 0.35 and `nms_iou` 0.50 by inheritance, not measurement. Now that a real match runs end to end, both can be tuned against one. |
 
 ## Phase 3 — Operations
 

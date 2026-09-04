@@ -406,14 +406,16 @@ The `.onnx` is model data. **Never commit it.**
 
 ## Step 6 — Plug it into the analyzer
 
+**Copy the example that matches your model.** `robot-v1` and `robot-v2` are YOLO:
+
 ```powershell
-Copy-Item analysis\config\detector.example.json analysis\config\detector.local.json
+Copy-Item analysis\config\detector.yolo.example.json analysis\config\detector.local.json
 ```
 
-If your model is at the standard path, `model_path` already points at it:
+For an RF-DETR export, copy `detector.example.json` instead. Point `model_path` at your file:
 
 ```json
-"model_path": "../../data/models/robot-v1/onnx/inference_model.onnx"
+"model_path": "../../data/robot-v2.onnx"
 ```
 
 Then:
@@ -426,9 +428,27 @@ $env:FRC_DETECTOR_CONFIG = (Resolve-Path "analysis\config\detector.local.json").
 Queue a match the model has never seen. The analysis view should report a configured detector and
 non-zero tracks, and the overlay boxes should track robots with gaps at broadcast cuts.
 
-The C++ side reads RF-DETR's named `dets` and `labels` outputs, keeps only class `robot`, and
-emits normalised boxes with explicit gaps. It does **not** yet do bumper OCR, team ID, field
-homography, or action events.
+### What the C++ side does with the two families
+
+They agree on nothing except taking an image and returning boxes, so the analyzer reads the
+**model's own outputs** to decide which one it is holding rather than trusting the config:
+
+| | YOLO (`robot-v1`, `robot-v2`) | RF-DETR |
+|---|---|---|
+| outputs | one, `(1, 4+classes, anchors)` or its transpose | two, `dets` and `labels` |
+| input | letterboxed into the square, grey padding | stretched to fill the square |
+| pixels | `/255` | ImageNet mean and standard deviation |
+| scores | already probabilities | logits, so sigmoid first |
+| duplicates | one prediction per anchor, so suppression is required | one query per object, so none is |
+
+Every one of those differences is silent when you get it wrong. Feed a letterboxed model a
+stretched image and it still returns boxes -- plausible-looking ones, sitting on nothing. Skip
+suppression and one robot arrives as seven, inflating every count downstream. So
+`analysis/tests/detector_test.cpp` pins the arithmetic directly, and the port was checked
+box-for-box against `detect_runner.py` on real frames before it was trusted.
+
+Resolution comes from the model too. If you set `input_width`/`input_height` and they contradict
+the export, the analyzer refuses to run rather than quietly mis-scaling every box.
 
 ## When it goes wrong
 
@@ -440,6 +460,9 @@ homography, or action events.
 | No tracks at all | `FRC_DETECTOR_CONFIG` must be set in the *same* PowerShell window as `run.ps1 full`. Check the ONNX path resolves. |
 | Boxes drift across camera cuts | Detector is fine — that's the gap logic. Never interpolate across a gap. |
 | Boxes are just wrong | Review more matches, train `robot-v2` into a **new** folder. Never overwrite v1 or any raw output. |
+| Boxes plausible but on nothing | Wrong family for the model. A one-output export is YOLO. |
+| `model_version` says `detector-unconfigured` | `FRC_DETECTOR_CONFIG` was not set, or was set in a different window. |
+| `Detector config says AxB but the model declares CxD` | Working as intended. Delete `input_width`/`input_height` and let the model say. |
 
 ## Never commit
 

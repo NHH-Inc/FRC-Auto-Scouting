@@ -413,7 +413,7 @@ function Invoke-Check {
                             $events = @(Get-Content $eventsPath | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
                             if ($result.schema_version -ne $expectedVersion -or $result.frames_total -le 1 -or
                                 $result.frames_analyzed -ne 0 -or $result.tracks_emitted -ne 0 -or
-                                $result.model_version -ne 'rfdetr-unconfigured' -or $tracks.Count -ne 0 -or
+                                $result.model_version -ne 'detector-unconfigured' -or $tracks.Count -ne 0 -or
                                 $events.Count -ne 2 -or $events[0].event_type -ne 'match_start' -or
                                 $events[1].event_type -ne 'match_end') {
                                 Bad 'analysis smoke output is not the expected unconfigured-detector baseline'
@@ -423,18 +423,21 @@ function Invoke-Check {
                         }
                     }
 
-                    # Tracker behaviour. Pure geometry, no model or video needed, so the awkward
-                    # cases -- crossing robots, fast motion, occlusion, camera cuts -- are cheap
-                    # to check directly and catch regressions the smoke test cannot see.
-                    $trackerTest = Get-ChildItem -Path (Join-Path $repo 'analysis/build') -Recurse -Filter 'tracker_test.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-                    if ($trackerTest) {
-                        $trackerOut = & $trackerTest.FullName 2>&1 | Out-String
-                        Write-Host $trackerOut
+                    # Tracker and detector behaviour. Both are pure -- no model or video needed
+                    # -- so the awkward cases (crossing robots, occlusion, camera cuts, a 16:9
+                    # frame in a square input, anchor clusters) are cheap to check directly and
+                    # catch regressions the smoke test cannot see.
+                    foreach ($nativeTest in @('tracker_test.exe', 'detector_test.exe')) {
+                        $found = Get-ChildItem -Path (Join-Path $repo 'analysis/build') -Recurse -Filter $nativeTest -ErrorAction SilentlyContinue | Select-Object -First 1
+                        if (-not $found) { continue }
+                        $label = $nativeTest -replace '_test\.exe$', ' tests'
+                        $testOut = & $found.FullName 2>&1 | Out-String
+                        Write-Host $testOut
                         if ($LASTEXITCODE -ne 0) {
-                            Bad 'tracker tests failed'
-                            $failed += 'tracker tests'
+                            Bad "$label failed"
+                            $failed += $label
                         }
-                        else { Ok 'tracker tests' }
+                        else { Ok $label }
                     }
                 }
             }

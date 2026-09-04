@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "ContractModels.h"
-#include "RFDetrDetector.h"
+#include "RobotDetector.h"
 
 namespace frc::vision {
 
@@ -58,9 +58,15 @@ class IoUTracker {
 
     void open_gap(State& state, double start, const char* reason);
     void close_gap(State& state, double end);
+    /** Ends tracks that have gone unseen too long to still be identifiable. */
+    void retire_stale(double t_seconds);
     double minimum_iou_;
     int missed_samples_before_gap_;
     std::vector<State> states_;
+    /** Tracks that ended before the segment did. */
+    std::vector<frc::Track> retired_;
+    /** Ids are handed out in order and never reused, so retiring a track cannot renumber another. */
+    int next_track_id_ = 0;
     std::vector<frc::Track> output_;
 };
 

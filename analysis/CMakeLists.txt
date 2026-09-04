@@ -28,8 +28,8 @@ add_executable(analysis
     src/ContractModels.h
     src/IoUTracker.cpp
     src/IoUTracker.h
-    src/RFDetrDetector.cpp
-    src/RFDetrDetector.h
+    src/RobotDetector.cpp
+    src/RobotDetector.h
     src/Homography.cpp
 )
 
@@ -42,6 +42,15 @@ add_executable(tracker_test
     src/IoUTracker.cpp
 )
 target_link_libraries(tracker_test PRIVATE nlohmann_json::nlohmann_json ${OpenCV_LIBS})
+
+# Detector post-processing tests. The arithmetic between a raw tensor and a box on a robot is
+# pure, so it is tested here without a model or ONNX Runtime -- the ONNX session itself is behind
+# FRC_HAVE_ONNXRUNTIME, which this target deliberately does not define.
+add_executable(detector_test
+    tests/detector_test.cpp
+    src/RobotDetector.cpp
+)
+target_link_libraries(detector_test PRIVATE nlohmann_json::nlohmann_json ${OpenCV_LIBS})
 
 
 if (TARGET onnxruntime::onnxruntime)

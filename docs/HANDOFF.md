@@ -47,12 +47,18 @@ row that is wrong; they have been corrected, but if you find that row anywhere e
 | Human review of auto-labels | **Roboflow handoff documented; needs a project/account and people reviewing** | Robert |
 | Detector training | **local RF-DETR trainer/export script ready; needs reviewed multi-match labels** | Robert |
 
-**The critical path is still the analysis backend, but the pipe is proven.** The binary opens a
-real segment with OpenCV, reads its true dimensions and frame count, and emits contract-valid
-match-boundary events. If `FRC_DETECTOR_CONFIG` names a trained RF-DETR ONNX file, it runs real
-robot detection and conservative IoU tracking, including explicit cut/lost-detection gaps. With
-no local model configured it intentionally emits **zero tracks** — it never invents a diagnostic
-robot box. Bumper OCR, team identification, field homography and action events remain to build.
+**The pipeline has now run end to end on a real match.** The binary opens a real segment with
+OpenCV, reads its true dimensions and frame count, and emits contract-valid match-boundary
+events. If `FRC_DETECTOR_CONFIG` names a trained ONNX file — YOLO or RF-DETR, decided by the
+model's own outputs rather than by config — it runs real robot detection and conservative IoU
+tracking, including explicit cut/lost-detection gaps. With no local model configured it
+intentionally emits **zero tracks** — it never invents a diagnostic robot box. Bumper OCR, team
+identification, field homography and action events remain to build.
+
+For a long time the analyzer could only load RF-DETR, while both trained models are YOLO, so
+every real run analysed zero frames and said so in `result.json` without anyone reading it. The
+lesson is cheap to state and was expensive to find: **a component tested only in isolation tells
+you nothing about the seam next to it.**
 
 Nathaniel originally owned component 1; he is busy, so **Robert now owns components 1 and 2.**
 

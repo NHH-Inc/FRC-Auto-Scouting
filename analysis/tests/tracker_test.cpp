@@ -4,6 +4,7 @@
 // construction. No framework: a tiny assert harness keeps this buildable with the existing CMake
 // setup and makes failures readable.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -133,6 +134,73 @@ void stationary_robots_stay_put() {
     check(worst < 1e-6, "a parked robot's track does not drift");
 }
 
+// --- A robot that disappears for a long time ----------------------------------------------------
+// Found by running the pipeline end to end for the first time. Every one of the seven tracks in a
+// real match bridged gaps of four to thirteen seconds, jumping up to 0.7 frame widths -- the
+// speed gate is a rate, so a long enough gap made it permit the whole frame.
+void long_gap_ends_the_track() {
+    std::printf("a robot gone for several seconds\n");
+    IoUTracker tracker;
+    for (int step = 0; step < 6; ++step) tracker.update(step * 0.5, {box(0.20, 0.50)}, false);
+    for (int step = 6; step < 14; ++step) tracker.update(step * 0.5, {}, false);   // 4s of nothing
+    // Something appears on the far side of the field. It is not the same robot, and nothing
+    // observed says it is.
+    for (int step = 14; step < 20; ++step) tracker.update(step * 0.5, {box(0.75, 0.50)}, false);
+    tracker.finish(10.0);
+
+    check(tracker.tracks().size() == 2,
+          "a long absence ends the track rather than handing its identity to whatever appears "
+          "next (" + std::to_string(tracker.tracks().size()) + " tracks)");
+    double worst = 0.0;
+    for (const auto& t : tracker.tracks()) worst = std::max(worst, max_jump(t));
+    check(worst < 0.30, "no track contains a jump across the field");
+}
+
+// A gap short enough to be an occlusion still belongs to one robot: it is the same argument
+// running the other way, and losing this would trade one failure for its mirror image.
+void short_gap_keeps_the_track() {
+    std::printf("a robot briefly hidden\n");
+    IoUTracker tracker;
+    for (int step = 0; step < 6; ++step) tracker.update(step * 0.5, {box(0.20, 0.50)}, false);
+    tracker.update(3.0, {}, false);
+    tracker.update(3.5, {}, false);
+    for (int step = 8; step < 12; ++step) tracker.update(step * 0.5, {box(0.22, 0.50)}, false);
+    tracker.finish(6.0);
+    check(tracker.tracks().size() == 1,
+          "a one-second occlusion is still one robot (" +
+              std::to_string(tracker.tracks().size()) + " tracks)");
+}
+
+// Distance is capped independently of how long the gap was, so a detection far away is never
+// claimed even while the track is still alive.
+void distant_detection_is_not_claimed() {
+    std::printf("a detection too far away to be the same robot\n");
+    IoUTracker tracker;
+    for (int step = 0; step < 6; ++step) tracker.update(step * 0.5, {box(0.20, 0.50)}, false);
+    tracker.update(3.0, {}, false);
+    tracker.update(3.5, {box(0.70, 0.50)}, false);   // half the frame away, 1s later
+    tracker.finish(5.0);
+    check(tracker.tracks().size() == 2,
+          "half a frame in one second starts a new track (" +
+              std::to_string(tracker.tracks().size()) + " tracks)");
+}
+
+// Ids are handed out from a counter, so retiring one track cannot renumber another. Two tracks
+// sharing an id would silently merge two robots in every downstream per-team total.
+void ids_are_unique() {
+    std::printf("track ids after a retirement\n");
+    IoUTracker tracker;
+    for (int step = 0; step < 6; ++step) tracker.update(step * 0.5, {box(0.20, 0.50)}, false);
+    for (int step = 6; step < 14; ++step) tracker.update(step * 0.5, {}, false);
+    for (int step = 14; step < 20; ++step)
+        tracker.update(step * 0.5, {box(0.75, 0.50), box(0.30, 0.30)}, false);
+    tracker.finish(10.0);
+    std::vector<int> ids;
+    for (const auto& t : tracker.tracks()) ids.push_back(t.track_id);
+    std::sort(ids.begin(), ids.end());
+    check(std::adjacent_find(ids.begin(), ids.end()) == ids.end(), "every track id is distinct");
+}
+
 }  // namespace
 
 int main() {
@@ -141,6 +209,10 @@ int main() {
     brief_occlusion();
     camera_cut_is_not_bridged();
     stationary_robots_stay_put();
+    long_gap_ends_the_track();
+    short_gap_keeps_the_track();
+    distant_detection_is_not_claimed();
+    ids_are_unique();
     std::printf("\n%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

@@ -1,0 +1,9 @@
+{
+  "model_path": "../../data/robot-v2.onnx",
+  "model_version": "yolo11s-robot-v2",
+  "family": "yolo",
+  "score_threshold": 0.35,
+  "nms_iou": 0.50,
+  "sample_rate_hz": 2.0,
+  "shot_change_threshold": 0.55
+}

@@ -340,8 +340,14 @@ cmake --build analysis\build --config Release
 ```
 
 OpenCV and ONNX Runtime are linked on a Windows inference machine. The detector stays disabled
-until `FRC_DETECTOR_CONFIG` points to a trained local RF-DETR ONNX file; the reproducible smoke
-test deliberately clears that variable so it always checks plumbing rather than local weights.
+until `FRC_DETECTOR_CONFIG` points to a trained local ONNX file; the reproducible smoke test
+deliberately clears that variable so it always checks plumbing rather than local weights.
+
+Both detector families are supported and the family is read from the model rather than declared:
+one output is a **YOLO** export (letterboxed, `/255`, suppressed after decoding), two are
+**RF-DETR** (`dets` + `labels`, ImageNet-normalised, stretched to square). Getting this wrong
+does not fail loudly -- it produces boxes that look plausible and sit nowhere near a robot -- so
+`analysis\config\detector.yolo.example.json` is the one to copy for `robot-v1`/`robot-v2`.
 `run.ps1 check` finds this toolchain on its own and runs the same build.
 
 **Regenerating fixtures.** Deterministic, so a clean regeneration changes nothing and CI fails

@@ -24,7 +24,7 @@ export function AnalysisPanel({
     );
   }
 
-  const detectorConfigured = result.modelVersion !== 'rfdetr-unconfigured';
+  const detectorConfigured = result.modelVersion !== 'detector-unconfigured';
   const analyzedPercent = result.framesTotal > 0
     ? Math.round((100 * result.framesAnalyzed) / result.framesTotal)
     : 0;
