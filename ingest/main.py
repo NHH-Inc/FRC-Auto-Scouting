@@ -54,6 +54,12 @@ async def contract_http_error(_request: Request, exc: HTTPException):
 def _classify(exc: Exception) -> str:
     """Map a failure onto the closed error_code set so the UI knows whether to offer retry."""
     text = str(exc).lower()
+    # YouTube's bot check is gating, not a broken download. It used to land in download_failed
+    # because the message happens to contain the string "yt-dlp" (in a help URL), and the UI then
+    # offered an immediate retry that could not possibly work. Backing off, or supplying cookies,
+    # is what fixes it.
+    if "not a bot" in text or "sign in to confirm" in text:
+        return "rate_limited"
     if "429" in text or "rate" in text and "limit" in text:
         return "rate_limited"
     if "unavailable" in text or "private" in text or "removed" in text or "404" in text:

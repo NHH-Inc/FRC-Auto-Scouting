@@ -70,6 +70,60 @@ hand-placed box is a detection.
 
 ---
 
+## Field coordinates: calibrating a camera
+
+Without this, positions are pixels, `homography_ok` is false, and speed and distance have no
+units. With it they are feet, which is the only form comparable between venues, camera positions
+and zoom levels.
+
+The field's AprilTags are surveyed and published, and OpenCV reads their family, so a fixed camera
+can often calibrate itself from footage alone:
+
+```powershell
+python -m ingest.collection.calibrate --video data\segments\<clip>.mp4 --out analysis\config\homography.<venue>.json --region 0.0 0.68
+```
+
+`--region` restricts the search to a band of the frame, given as fractions of its height. **Use it
+whenever a broadcast stacks two camera views**, which the 2026 ones do: the same physical tag
+appears in both views, and a fit across that boundary mixes two cameras and reports wrong
+positions forever without complaining.
+
+Then point the analyzer at the result:
+
+```powershell
+$env:FRC_HOMOGRAPHY_CONFIG = (Resolve-Path "analysis\config\homography.<venue>.json").Path
+```
+
+### When it cannot finish, and what to do
+
+It refuses rather than guessing, and hands over what you need to finish by hand: a **reference
+frame** with a pixel grid and the tags marked, and an **extra-points template**. Read pixel
+coordinates for field features you can identify — the corners of the carpet are the usual choice —
+pair them with their position in feet, and re-run with `--extra-points`.
+
+Two refusals you should expect:
+
+- **"the points are degenerate"** — the tags lie on a line. This happened on the real İstanbul
+  footage: both goal structures carry their 3.68 ft tags at the same height, and a camera looking
+  down the field sees all four within **0.1 px of one image row**. Four collinear points cannot
+  define a plane mapping, and tags alone cannot calibrate that angle.
+- **"camera is not static"** — a tag's pixel position wandered across the clip. A homography
+  belongs to one camera pose; pooling detections from a panning camera invents points that were
+  never there. Calibrate from a still passage, or per camera position.
+
+### Two things to know about the result
+
+**Four points cannot be checked.** Any four fit a homography exactly, so the reprojection error is
+zero by construction and is not evidence. Five or more is where it starts to mean something, which
+is what `--extra-points` is for. The tool says which case you are in rather than printing a
+reassuring number.
+
+**The mapping is to the tag plane, not the carpet.** The tags sit 3.68 ft up, so a position read
+through the homography is where the robot's box meets *that* plane — offset from where it actually
+stands by an amount that grows with camera angle. Fine for which end of the field a robot is in
+and roughly how fast it crossed; not fine for anything adversarial. The output records
+`plane_height_ft` so nobody has to guess.
+
 ## Team identification needs Tesseract
 
 Optional, and everything else works without it: with no Tesseract, every track simply stays

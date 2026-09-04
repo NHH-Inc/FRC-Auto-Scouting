@@ -101,6 +101,31 @@ def require_free_space(path: "Path | str", need_gb: float = 0.0) -> None:
         )
 
 
+
+def apply_cookies(ydl_opts: dict) -> dict:
+    """Attach whichever cookie source is configured, if any.
+
+    YouTube intermittently answers "Sign in to confirm you're not a bot". It is not a permanent
+    block -- six consecutive requests succeeded right after one failed -- but it recurs, and it
+    recurs hardest when fetching many videos in a row, which is exactly what a collection run does.
+
+    Two sources, because the obvious one does not work here. `cookiesfrombrowser` cannot read
+    Chrome on Windows any more: Chrome encrypts its cookie store with app-bound DPAPI and yt-dlp
+    fails with "Failed to decrypt with DPAPI" (yt-dlp issue 10927). Firefox still works, and an
+    exported cookies.txt always works, so the file option is the one to reach for on Windows.
+
+    A cookie file makes requests as whoever exported it. Use a throwaway Google account rather
+    than a personal one.
+    """
+    cookie_file = os.environ.get("YTDLP_COOKIES_FILE")
+    if cookie_file:
+        ydl_opts["cookiefile"] = cookie_file
+        return ydl_opts
+    browser = os.environ.get("YTDLP_COOKIES_FROM_BROWSER")
+    if browser:
+        ydl_opts["cookiesfrombrowser"] = (browser,)
+    return ydl_opts
+
 class VideoDownloader:
     """Downloads browser-playable local MP4 files, one at a time."""
 
@@ -137,9 +162,7 @@ class VideoDownloader:
             "skip_download": True,
             "format": self.format_selector,
         }
-        cookies = os.environ.get("YTDLP_COOKIES_FROM_BROWSER")
-        if cookies:
-            ydl_opts["cookiesfrombrowser"] = (cookies,)
+        apply_cookies(ydl_opts)
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 return ydl.extract_info(url, download=False)
@@ -174,9 +197,7 @@ class VideoDownloader:
                 "bv[height<=720]+ba/b[height<=720]/best"
             ),
         }
-        cookies = os.environ.get("YTDLP_COOKIES_FROM_BROWSER")
-        if cookies:
-            options["cookiesfrombrowser"] = (cookies,)
+        apply_cookies(options)
 
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
@@ -308,9 +329,7 @@ class VideoDownloader:
         if not full_video:
             ydl_opts["download_ranges"] = download_range_func([], [(start_time, end_time)])
             ydl_opts["force_keyframes_at_cuts"] = True
-        cookies = os.environ.get("YTDLP_COOKIES_FROM_BROWSER")
-        if cookies:
-            ydl_opts["cookiesfrombrowser"] = (cookies,)
+        apply_cookies(ydl_opts)
 
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
@@ -381,9 +400,7 @@ class VideoDownloader:
             "merge_output_format": "mp4",
         }
 
-        cookies = os.environ.get("YTDLP_COOKIES_FROM_BROWSER")
-        if cookies:
-            ydl_opts["cookiesfrombrowser"] = (cookies,)
+        apply_cookies(ydl_opts)
 
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
