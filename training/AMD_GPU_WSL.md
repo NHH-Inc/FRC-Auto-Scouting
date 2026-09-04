@@ -112,3 +112,35 @@ starting; `wsl --unregister Ubuntu-22.04` reclaims all of it.
 
 `Warning: Resource leak detected by SharedSignalPool, N Signals leaked.` appears at the
 end of a run. It is a ROCm cleanup warning, not a training problem.
+
+## TensorFlow on this GPU: still no, even with ROCm working
+
+Tested 2026-09-03, after PyTorch was confirmed working on the same card in the same WSL
+environment. Worth recording, because "ROCm works now" makes it tempting to assume
+TensorFlow follows.
+
+`tensorflow-rocm` tops out at **2.14.0.600**, and it refuses gfx1101 by name:
+
+    Ignoring visible gpu device (AMD Radeon RX 7800 XT) with AMDGPU version : gfx1101.
+    The supported AMDGPU versions are gfx1030, gfx1100, gfx900, gfx906, gfx908,
+    gfx90a, gfx940, gfx941, gfx942.
+
+gfx1100 is on that list and is the same RDNA3 generation, so the usual fix is
+`HSA_OVERRIDE_GFX_VERSION=11.0.0`. It does not work here — the WSL HSA runtime asserts
+and dies:
+
+    libhsakmt/src/topology.cpp:613: Assertion `props.EngineId.ui32.Major &&
+    "HSA_OVERRIDE_GFX_VERSION may be needed"' failed.
+
+The override is a native-Linux mechanism; the dxg-based WSL runtime does not honour it.
+
+So TensorFlow has now failed on this card three separate ways: DirectML (TF pinned to
+2.10, keras-cv needs 2.11+), torch-directml (wrong dtype in YOLO's assigner), and
+TF-ROCm (gfx1101 unsupported, override crashes). PyTorch works on the same GPU, in the
+same distro, with no workarounds at all.
+
+TensorFlow on CPU still works and is a legitimate overnight option -- `tensorflow-cpu`
+2.16 with keras-cv 0.9 is a valid pairing. The reason not to bother is not that it
+fails; it is that keras-cv emits `.keras`, which nothing in this project can load. The
+C++ analyzer reads ONNX. Converting would need tf2onnx plus matching keras-cv's output
+layout to what OnnxDetector expects, and that work has not been done.
