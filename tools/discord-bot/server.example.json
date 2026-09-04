@@ -1,0 +1,95 @@
+{
+  "_comment": [
+    "The server you want, described rather than clicked. Edit this, run the bot, read the plan,",
+    "then apply. Anything already correct is left alone, so re-running is safe and boring.",
+    "",
+    "Nothing here deletes. Channels, categories and roles you remove from this file are reported",
+    "as 'not in config' and left in place -- a config file is a poor reason to destroy a channel",
+    "with history in it. Delete those by hand if you actually mean it."
+  ],
+
+  "roles": [
+    {
+      "name": "Lead",
+      "colour": "#e67e22",
+      "hoist": true,
+      "mentionable": true,
+      "permissions": ["manage_channels", "manage_messages", "mention_everyone"]
+    },
+    {
+      "name": "Programming",
+      "colour": "#3498db",
+      "hoist": true,
+      "mentionable": true,
+      "permissions": []
+    },
+    {
+      "name": "Scouting",
+      "colour": "#2ecc71",
+      "hoist": true,
+      "mentionable": true,
+      "permissions": []
+    },
+    {
+      "name": "Build",
+      "colour": "#9b59b6",
+      "hoist": true,
+      "mentionable": true,
+      "permissions": []
+    }
+  ],
+
+  "categories": [
+    {
+      "name": "INFO",
+      "channels": [
+        { "name": "announcements", "type": "text", "topic": "Team-wide notices. Leads post, everyone reads.",
+          "read_only_for": ["@everyone"] },
+        { "name": "rules", "type": "text", "topic": "Server and team rules.",
+          "read_only_for": ["@everyone"] },
+        { "name": "competition-dates", "type": "text", "topic": "Regionals, deadlines, meeting times." }
+      ]
+    },
+    {
+      "name": "GENERAL",
+      "channels": [
+        { "name": "general", "type": "text", "topic": "Anything." },
+        { "name": "random", "type": "text", "topic": "Off-topic." },
+        { "name": "voice-lounge", "type": "voice" }
+      ]
+    },
+    {
+      "name": "PROGRAMMING",
+      "channels": [
+        { "name": "programming", "type": "text", "topic": "Robot and software code." },
+        { "name": "tengen-scouting-app", "type": "text", "topic": "Project Tengen: the video scouting system." },
+        { "name": "commits", "type": "text", "topic": "GitHub webhook lands here.",
+          "read_only_for": ["@everyone"] },
+        { "name": "programming-voice", "type": "voice" }
+      ]
+    },
+    {
+      "name": "SCOUTING",
+      "channels": [
+        { "name": "scouting", "type": "text", "topic": "Match scouting coordination." },
+        { "name": "match-data", "type": "text", "topic": "Exported results and spreadsheets." },
+        { "name": "pit-scouting", "type": "text", "topic": "Notes on other teams' robots." }
+      ]
+    },
+    {
+      "name": "BUILD",
+      "channels": [
+        { "name": "build", "type": "text", "topic": "Mechanical and electrical." },
+        { "name": "cad", "type": "text", "topic": "Designs and drawings." }
+      ]
+    },
+    {
+      "name": "LEADS",
+      "private_to": ["Lead"],
+      "channels": [
+        { "name": "leads-only", "type": "text", "topic": "Leadership discussion." },
+        { "name": "leads-voice", "type": "voice" }
+      ]
+    }
+  ]
+}
