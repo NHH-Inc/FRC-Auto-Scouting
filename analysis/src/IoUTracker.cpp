@@ -1,6 +1,7 @@
 #include "IoUTracker.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -21,7 +22,63 @@ frc::Box as_box(double t, const Detection& detection) {
     return {t, detection.x, detection.y, detection.w, detection.h};
 }
 
+/**
+ * How far a box centre may travel per second, in frame widths, and still be the same robot.
+ *
+ * Prediction alone cannot rescue the first step of a track: velocity needs two observations, and
+ * a track that dies before its second one never gets them. That is the chicken-and-egg that left
+ * a fast robot as nine separate tracks even after prediction was added -- every sample it moved
+ * far enough to miss on IoU, so every sample it started over.
+ *
+ * A displacement gate breaks the cycle using physics instead of history. An FRC robot is
+ * drivetrain-limited, so across a fifth of a second it simply cannot cross the frame. Matching a
+ * box that near is safe; matching one further away would be claiming a robot teleported.
+ *
+ * Deliberately generous, because normalised speed depends on zoom -- the same robot moves through
+ * far more of the frame in a tight shot than a wide one. It only has to exclude the absurd.
+ */
+constexpr double kMaxCentreSpeed = 1.0;
+
+/** Centre-to-centre distance between a predicted box and a detection. */
+double centre_distance(const frc::Box& a, const Detection& b) {
+    const double dx = (a.x + a.w / 2.0) - (b.x + b.w / 2.0);
+    const double dy = (a.y + a.h / 2.0) - (b.y + b.h / 2.0);
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+/** Median of a small sample. Used for velocity so one stray box cannot set the direction. */
+double median_of(std::vector<double> values) {
+    if (values.empty()) return 0.0;
+    std::sort(values.begin(), values.end());
+    const size_t mid = values.size() / 2;
+    return values.size() % 2 ? values[mid] : (values[mid - 1] + values[mid]) / 2.0;
+}
+
 }  // namespace
+
+frc::Box IoUTracker::predict(const State& state, double t) {
+    const auto& recent = state.recent;
+    frc::Box out = state.last_box;
+    if (recent.size() < 2) return out;   // nothing to infer motion from yet
+
+    // Per-interval slopes over the last few observations; the median resists a single bad box.
+    std::vector<double> vx, vy;
+    const size_t first = recent.size() > 4 ? recent.size() - 4 : 0;
+    for (size_t i = first + 1; i < recent.size(); ++i) {
+        const double dt = recent[i].t - recent[i - 1].t;
+        if (dt > 1e-9) {
+            vx.push_back((recent[i].x - recent[i - 1].x) / dt);
+            vy.push_back((recent[i].y - recent[i - 1].y) / dt);
+        }
+    }
+    if (vx.empty()) return out;
+
+    const double dt = t - state.last_box.t;
+    if (dt <= 0.0) return out;
+    out.x += median_of(vx) * dt;
+    out.y += median_of(vy) * dt;
+    return out;
+}
 
 IoUTracker::IoUTracker(double minimum_iou, int missed_samples_before_gap)
     : minimum_iou_(minimum_iou), missed_samples_before_gap_(missed_samples_before_gap) {}
@@ -46,30 +103,60 @@ void IoUTracker::update(double t_seconds, const std::vector<Detection>& detectio
     }
 
     std::vector<bool> detection_used(detections.size(), false);
-    // Greedy matching is deterministic: for each existing track select its highest-IoU unused box.
-    for (auto& state : states_) {
-        int best = -1;
-        double best_iou = minimum_iou_;
-        for (size_t index = 0; index < detections.size(); ++index) {
-            if (detection_used[index]) continue;
-            const double score = iou(state.last_box, detections[index]);
-            if (score >= best_iou) {
-                best_iou = score;
-                best = static_cast<int>(index);
+    std::vector<bool> track_matched(states_.size(), false);
+
+    // Score every plausible pairing against where each track is PREDICTED to be, then take the
+    // strongest pairing first. Scoring against the last known box loses any robot that moved;
+    // resolving in track order lets two crossing robots trade identities.
+    struct Candidate { double score; size_t track; size_t detection; };
+    std::vector<Candidate> candidates;
+    for (size_t s = 0; s < states_.size(); ++s) {
+        const frc::Box expected = predict(states_[s], t_seconds);
+        const double dt = std::max(1e-6, t_seconds - states_[s].last_box.t);
+        const double reach = kMaxCentreSpeed * dt;
+        for (size_t d = 0; d < detections.size(); ++d) {
+            const double overlap = iou(expected, detections[d]);
+            if (overlap >= minimum_iou_) {
+                candidates.push_back({overlap, s, d});
+                continue;
+            }
+            // No overlap, but close enough that a robot could plausibly have moved there. Scored
+            // strictly below any genuine overlap, so a real IoU match always wins the assignment
+            // and this only decides cases nothing else claims.
+            const double distance = centre_distance(expected, detections[d]);
+            if (distance <= reach) {
+                const double proximity = 1.0 - distance / reach;
+                candidates.push_back({minimum_iou_ * 0.5 * proximity, s, d});
             }
         }
-        if (best >= 0) {
-            close_gap(state, t_seconds);
-            state.last_box = as_box(t_seconds, detections[best]);
-            state.track.boxes.push_back(state.last_box);
-            state.last_seen = t_seconds;
-            state.missed_samples = 0;
-            detection_used[best] = true;
-        } else {
-            ++state.missed_samples;
-            if (state.missed_samples >= missed_samples_before_gap_) {
-                open_gap(state, state.last_seen, frc::gap_reason::kDetectionLost);
-            }
+    }
+    // Ties broken by index so the result does not depend on sort implementation.
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        if (a.score != b.score) return a.score > b.score;
+        if (a.track != b.track) return a.track < b.track;
+        return a.detection < b.detection;
+    });
+
+    for (const auto& c : candidates) {
+        if (track_matched[c.track] || detection_used[c.detection]) continue;
+        State& state = states_[c.track];
+        close_gap(state, t_seconds);
+        state.last_box = as_box(t_seconds, detections[c.detection]);
+        state.track.boxes.push_back(state.last_box);
+        state.recent.push_back(state.last_box);
+        if (state.recent.size() > 5) state.recent.erase(state.recent.begin());
+        state.last_seen = t_seconds;
+        state.missed_samples = 0;
+        track_matched[c.track] = true;
+        detection_used[c.detection] = true;
+    }
+
+    for (size_t s = 0; s < states_.size(); ++s) {
+        if (track_matched[s]) continue;
+        State& state = states_[s];
+        ++state.missed_samples;
+        if (state.missed_samples >= missed_samples_before_gap_) {
+            open_gap(state, state.last_seen, frc::gap_reason::kDetectionLost);
         }
     }
     for (size_t index = 0; index < detections.size(); ++index) {
@@ -78,6 +165,7 @@ void IoUTracker::update(double t_seconds, const std::vector<Detection>& detectio
         state.track.track_id = static_cast<int>(states_.size());
         state.last_box = as_box(t_seconds, detections[index]);
         state.track.boxes.push_back(state.last_box);
+        state.recent.push_back(state.last_box);
         state.last_seen = t_seconds;
         states_.push_back(std::move(state));
     }

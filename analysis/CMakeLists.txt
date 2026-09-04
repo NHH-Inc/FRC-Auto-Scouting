@@ -34,6 +34,16 @@ add_executable(analysis
 )
 
 target_link_libraries(analysis PRIVATE nlohmann_json::nlohmann_json ${OpenCV_LIBS})
+
+# Tracker tests. The tracker is pure geometry, so it needs neither OpenCV nor a model -- which is
+# what makes the awkward cases (crossing robots, occlusions, camera cuts) cheap to test directly.
+add_executable(tracker_test
+    tests/tracker_test.cpp
+    src/IoUTracker.cpp
+)
+target_link_libraries(tracker_test PRIVATE nlohmann_json::nlohmann_json ${OpenCV_LIBS})
+
+
 if (TARGET onnxruntime::onnxruntime)
     target_link_libraries(analysis PRIVATE onnxruntime::onnxruntime)
     target_compile_definitions(analysis PRIVATE FRC_HAVE_ONNXRUNTIME=1)

@@ -422,6 +422,20 @@ function Invoke-Check {
                             else { Ok 'analysis real-video smoke test' }
                         }
                     }
+
+                    # Tracker behaviour. Pure geometry, no model or video needed, so the awkward
+                    # cases -- crossing robots, fast motion, occlusion, camera cuts -- are cheap
+                    # to check directly and catch regressions the smoke test cannot see.
+                    $trackerTest = Get-ChildItem -Path (Join-Path $repo 'analysisuild') -Recurse -Filter 'tracker_test.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if ($trackerTest) {
+                        $trackerOut = & $trackerTest.FullName 2>&1 | Out-String
+                        Write-Host $trackerOut
+                        if ($LASTEXITCODE -ne 0) {
+                            Bad 'tracker tests failed'
+                            $failed += 'tracker tests'
+                        }
+                        else { Ok 'tracker tests' }
+                    }
                 }
             }
         }
