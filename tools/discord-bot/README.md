@@ -134,3 +134,18 @@ under your account, by design.
 
 **Discovery traits** need the server to meet Discord's discovery thresholds (member count and
 activity) before the fields become editable at all.
+
+## Onboarding instead of reaction roles
+
+Role selection is Discord's native onboarding, not a reaction-role bot. Reaction roles need a
+process running forever to watch for reactions; kick the bot or let it crash and nobody can pick
+a role again. Onboarding is served by Discord itself, keeps working with no bot present, and stays
+editable in Server Settings — which is what makes it safe to remove this bot when setup is done.
+
+Two prompts: **What brings you here?** (reveals relevant channels) and **What should we ping you
+about?** (assigns the four `Ping: …` roles). Those roles carry **no permissions** — a notification
+preference must never quietly grant access to anything.
+
+`#frc-announcements` exists as a destination. Following has to be done from the *source* side:
+open the FRC server's announcement channel and use Follow, then pick this channel. A bot cannot do
+it, because the permission being exercised belongs to a member of that server, not to us.
